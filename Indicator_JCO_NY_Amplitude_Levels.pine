@@ -1,0 +1,591 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © jcornier
+//
+// Version: 1.0
+// GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
+//
+// Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
+//              range (CME Globex open to NY AM open) for contrarian scalping on NQ futures.
+//              Features include:
+//              - Pre-NY High/Low tracked from CME session open (22h UTC)
+//              - Levels dynamic until NY AM open (default 15h30 Paris), then frozen
+//              - Retracements: 0% / 38.2% / 50% / 61.8% / 78.6% / 100%
+//              - Extensions: 127.2% / 161.8% / 200%
+//              - Labels on each line with level name and price value
+//              - Midnight NY Open horizontal line (configurable timezone and time)
+//              - Dashboard: direction (UP/DOWN), frozen state, amplitude Pre-NY,
+//                amplitude mini / normale / safe (x1.5 / x2.0 of mini)
+//              - Visible from 7h Paris until end of NY PM session
+//
+// Changelog:
+//   v1.0 - 2026-04-07
+//     - Initial release
+
+//@version=6
+indicator("JCO NY Amplitude Levels", shorttitle="JCO NY Amplitude Levels", overlay=true, max_lines_count=500)
+
+// ── Session ───────────────────────────────────────────────────────────────────
+grp_sess = "Session NY AM"
+ny_hour  = input.int(15, "Heure debut NY AM (Paris)", minval=0, maxval=23, group=grp_sess)
+ny_min   = input.int(30, "Minute debut NY AM",         minval=0, maxval=59, group=grp_sess)
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+grp_dash  = "Dashboard"
+show_dash = input.bool(true, "Afficher le dashboard", group=grp_dash)
+
+// ── Retracements ──────────────────────────────────────────────────────────────
+grp_ret   = "Retracements (contre-tendance Pre-NY)"
+
+show_p0   = input.bool(true,  "0%",         inline="p0", group=grp_ret)
+col_p0    = input.color(color.new(color.orange,0),"", inline="p0", group=grp_ret)
+wid_p0    = input.int(1,"",minval=1,maxval=4,         inline="p0", group=grp_ret)
+sty_p0    = input.string("solid","",options=["solid","dashed","dotted"], inline="p0", group=grp_ret)
+
+show_p100 = input.bool(true,  "100%",       inline="p1", group=grp_ret)
+col_p100  = input.color(color.new(color.orange,0),"", inline="p1", group=grp_ret)
+wid_p100  = input.int(1,"",minval=1,maxval=4,         inline="p1", group=grp_ret)
+sty_p100  = input.string("solid","",options=["solid","dashed","dotted"], inline="p1", group=grp_ret)
+
+show_r382 = input.bool(true,  "38.2%",      inline="r1", group=grp_ret)
+col_r382  = input.color(color.new(color.red,     0),"", inline="r1", group=grp_ret)
+wid_r382  = input.int(1,"",minval=1,maxval=4,           inline="r1", group=grp_ret)
+sty_r382  = input.string("solid","",options=["solid","dashed","dotted"], inline="r1", group=grp_ret)
+
+show_r500 = input.bool(true,  "50.0%",      inline="r2", group=grp_ret)
+col_r500  = input.color(color.new(#1a7a1a,   0),"",    inline="r2", group=grp_ret)
+wid_r500  = input.int(1,"",minval=1,maxval=4,           inline="r2", group=grp_ret)
+sty_r500  = input.string("solid","",options=["solid","dashed","dotted"], inline="r2", group=grp_ret)
+
+show_r618 = input.bool(true,  "61.8% OTE+", inline="r3", group=grp_ret)
+col_r618  = input.color(color.new(color.blue,  0),"",  inline="r3", group=grp_ret)
+wid_r618  = input.int(1,"",minval=1,maxval=4,           inline="r3", group=grp_ret)
+sty_r618  = input.string("solid","",options=["solid","dashed","dotted"], inline="r3", group=grp_ret)
+
+show_r786 = input.bool(true,  "78.6% OTE-", inline="r4", group=grp_ret)
+col_r786  = input.color(color.new(color.purple,0),"",  inline="r4", group=grp_ret)
+wid_r786  = input.int(1,"",minval=1,maxval=4,          inline="r4", group=grp_ret)
+sty_r786  = input.string("solid","",options=["solid","dashed","dotted"], inline="r4", group=grp_ret)
+
+// ── Extensions ────────────────────────────────────────────────────────────────
+grp_ext    = "Extensions (continuation tendance Pre-NY)"
+
+show_e1272 = input.bool(true,  "127.2%", inline="e1", group=grp_ext)
+col_e1272  = input.color(color.new(color.gray,  0),"", inline="e1", group=grp_ext)
+wid_e1272  = input.int(1,"",minval=1,maxval=4,         inline="e1", group=grp_ext)
+sty_e1272  = input.string("dashed","",options=["solid","dashed","dotted"], inline="e1", group=grp_ext)
+
+show_e1618 = input.bool(true,  "161.8%", inline="e2", group=grp_ext)
+col_e1618  = input.color(color.new(color.gray,  0),"", inline="e2", group=grp_ext)
+wid_e1618  = input.int(1,"",minval=1,maxval=4,         inline="e2", group=grp_ext)
+sty_e1618  = input.string("dashed","",options=["solid","dashed","dotted"], inline="e2", group=grp_ext)
+
+show_e200  = input.bool(true,  "200.0%", inline="e3", group=grp_ext)
+col_e200   = input.color(color.new(color.gray,  0),"", inline="e3", group=grp_ext)
+wid_e200   = input.int(1,"",minval=1,maxval=4,         inline="e3", group=grp_ext)
+sty_e200   = input.string("dotted","",options=["solid","dashed","dotted"], inline="e3", group=grp_ext)
+
+// ── Midnight NY Open ──────────────────────────────────────────────────────────
+grp_mid = "Midnight NY Open"
+show_mid    = input.bool(true,   "Afficher la ligne",    group=grp_mid)
+col_mid     = input.color(color.new(color.blue, 0), "Couleur", group=grp_mid)
+wid_mid     = input.int(1,       "Epaisseur",  minval=1, maxval=5, group=grp_mid)
+sty_mid     = input.string("dashed", "Style", options=["solid","dashed","dotted"], group=grp_mid)
+mid_tz      = input.string("New York", "Timezone",
+              options=["New York","Chicago","Los Angeles","London","Paris","Berlin","Tokyo","Hong Kong","Sydney","UTC"],
+              group=grp_mid)
+mid_hour    = input.int(0, "Heure (0-23)",   minval=0, maxval=23, group=grp_mid)
+mid_minute  = input.int(0, "Minute (0-59)",  minval=0, maxval=59, group=grp_mid)
+
+// ── Detection heure d'ete Paris (CEST = GMT+2) ────────────────────────────────
+// Dernier dimanche de mars -> dernier dimanche d'octobre
+f_is_cest(t) =>
+    m   = month(t, "UTC")
+    d   = dayofmonth(t, "UTC")
+    dow = dayofweek(t, "UTC")   // 1=Dim, 7=Sam en Pine
+    // Dernier dimanche du mois = dernier jour dont dow==1
+    // = 31 - ((31 - d + dow - 1) % 7) mais on calcule plus simplement :
+    // quel dimanche tombe en fin de mois ?
+    days_since_sun = (dow - 1 + 7) % 7   // jours ecoules depuis dernier dimanche
+    last_sun = d - days_since_sun         // jour du dernier dimanche ecoule
+    // Le "vrai" dernier dimanche du mois :
+    days_in_month = m == 2 ? (year(t,"UTC") % 4 == 0 ? 29 : 28) : (m == 4 or m == 6 or m == 9 or m == 11 ? 30 : 31)
+    last_sun_of_month = days_in_month - (dow - 1 + 7) % 7
+    // Ajuster si on depasse le mois (dimanche apres la fin)
+    last_sun_of_month := last_sun_of_month > days_in_month ? last_sun_of_month - 7 : last_sun_of_month
+    if m > 3 and m < 10
+        true
+    else if m == 3
+        d >= last_sun_of_month   // apres le dernier dimanche de mars
+    else if m == 10
+        d < last_sun_of_month    // avant le dernier dimanche d'octobre
+    else
+        false
+
+// Heure d'ouverture NY en minutes UTC
+f_ny_utc_min(t) =>
+    paris_offset = f_is_cest(t) ? 2 : 1
+    ny_hour * 60 + ny_min - paris_offset * 60
+
+// Fin NY PM en minutes UTC
+f_day_end_min(t) =>
+    f_is_cest(t) ? 21 * 60 : 22 * 60
+
+// Conversion style string -> line.style
+f_linestyle(s) =>
+    s == "dashed" ? line.style_dashed : s == "dotted" ? line.style_dotted : line.style_solid
+
+// Timezone string -> IANA identifier
+f_tz(tz) =>
+    switch tz
+        "New York"    => "America/New_York"
+        "Chicago"     => "America/Chicago"
+        "Los Angeles" => "America/Los_Angeles"
+        "London"      => "Europe/London"
+        "Paris"       => "Europe/Paris"
+        "Berlin"      => "Europe/Berlin"
+        "Tokyo"       => "Asia/Tokyo"
+        "Hong Kong"   => "Asia/Hong_Kong"
+        "Sydney"      => "Australia/Sydney"
+        => "UTC"
+
+// ── Variables persistantes ────────────────────────────────────────────────────
+var float preny_high      = na
+var float preny_low       = na
+var int   preny_high_bar  = na   // bar_index du High
+var int   preny_low_bar   = na   // bar_index du Low
+var float preny_open      = na
+var float preny_close     = na
+
+// Snapshot fige
+var float snap_high      = na
+var float snap_low       = na
+var int   snap_high_bar  = na
+var int   snap_low_bar   = na
+var float snap_amp       = na
+var bool  frozen         = false
+
+// fibo_start / fibo_end = les deux extremes dans l'ordre chronologique
+var float fibo_start = na   // extreme le plus ancien = point 0% du Fibo
+var float fibo_end   = na   // extreme le plus recent = point 100% du Fibo
+
+var int   day_start_bar = 0
+
+var line ln_p0    = na
+var line ln_p100  = na
+var line ln_r382  = na
+var line ln_r500  = na
+var line ln_r618  = na
+var line ln_r786  = na
+var line ln_e1272 = na
+var line ln_e1618 = na
+var line ln_e200  = na
+var line ln_high  = na
+var line ln_low   = na
+
+var label lbl_p0    = na
+var label lbl_p100  = na
+var label lbl_r382  = na
+var label lbl_r500  = na
+var label lbl_r618  = na
+var label lbl_r786  = na
+var label lbl_e1272 = na
+var label lbl_e1618 = na
+var label lbl_e200  = na
+var label lbl_high  = na
+var label lbl_low   = na
+
+var bool session_started = false
+
+var line  ln_midnight  = na
+var label lbl_midnight = na
+var float mid_open     = na
+
+// ── Detection nouveau jour = reouverture de session du symbole ────────────────
+// session.isfirstbar = true sur le 1er bar de la session (22h UTC pour NQ CME)
+is_new_day = session.isfirstbar
+
+utc_h      = hour(time, "UTC")
+utc_m      = minute(time, "UTC")
+utc_total  = utc_h * 60 + utc_m
+
+ny_utc     = f_ny_utc_min(time)
+day_end    = f_day_end_min(time)
+// in_session doit etre calcule avant before_ny (dependance)
+in_session = utc_total >= ny_utc and utc_total < day_end
+at_ny_open = utc_total >= ny_utc and utc_total < ny_utc + 5 and not frozen
+// before_ny = tout ce qui n'est pas fige, pas en session, pas le 1er bar du jour
+// Inclut les barres 22h-00h UTC (ouverture CME Globex jusqu'a minuit UTC)
+before_ny  = not frozen and not in_session and not is_new_day
+
+// ── Reset au nouveau jour ─────────────────────────────────────────────────────
+if is_new_day
+    preny_high     := high
+    preny_low      := low
+    preny_high_bar := bar_index
+    preny_low_bar  := bar_index
+    preny_open     := open
+    preny_close    := na
+    frozen         := false
+    snap_high      := na
+    snap_low       := na
+    snap_high_bar  := na
+    snap_low_bar   := na
+    fibo_start     := na
+    fibo_end       := na
+    label.delete(lbl_p0)
+    label.delete(lbl_p100)
+    label.delete(lbl_r382)
+    label.delete(lbl_r500)
+    label.delete(lbl_r618)
+    label.delete(lbl_r786)
+    label.delete(lbl_e1272)
+    label.delete(lbl_e1618)
+    label.delete(lbl_e200)
+    label.delete(lbl_high)
+    label.delete(lbl_low)
+    lbl_p0    := na
+    lbl_p100  := na
+    lbl_r382  := na
+    lbl_r500  := na
+    lbl_r618  := na
+    lbl_r786  := na
+    lbl_e1272 := na
+    lbl_e1618 := na
+    lbl_e200  := na
+    lbl_high  := na
+    lbl_low   := na
+    line.delete(ln_p0)
+    line.delete(ln_p100)
+    line.delete(ln_r382)
+    line.delete(ln_r500)
+    line.delete(ln_r618)
+    line.delete(ln_r786)
+    line.delete(ln_e1272)
+    line.delete(ln_e1618)
+    line.delete(ln_e200)
+    line.delete(ln_high)
+    line.delete(ln_low)
+    ln_p0    := na
+    ln_p100  := na
+    ln_r382  := na
+    ln_r500  := na
+    ln_r618  := na
+    ln_r786  := na
+    ln_e1272 := na
+    ln_e1618 := na
+    ln_e200  := na
+    ln_high  := na
+    ln_low   := na
+    session_started := false
+    day_start_bar := bar_index
+
+// ── Accumulation Pre-NY ───────────────────────────────────────────────────────
+if before_ny and not is_new_day
+    if high > nz(preny_high, high)
+        preny_high     := high
+        preny_high_bar := bar_index
+    if low < nz(preny_low, low)
+        preny_low      := low
+        preny_low_bar  := bar_index
+    preny_close := close
+
+// ── Snapshot a l'ouverture NY ────────────────────────────────────────────────
+if at_ny_open
+    snap_high     := preny_high
+    snap_low      := preny_low
+    snap_high_bar := preny_high_bar
+    snap_low_bar  := preny_low_bar
+    snap_amp      := preny_high - preny_low
+    frozen        := true
+    // Determiner l'ordre chronologique
+    // Le plus ancien bar_index = le premier extreme dans le temps
+    if snap_high_bar <= snap_low_bar
+        // High apparu en premier -> Fibo de High vers Low (tendance descendante)
+        fibo_start := snap_high
+        fibo_end   := snap_low
+    else
+        // Low apparu en premier -> Fibo de Low vers High (tendance montante)
+        fibo_start := snap_low
+        fibo_end   := snap_high
+
+// ── Prix courants (dynamiques ou figes) ──────────────────────────────────────
+use_high = frozen ? snap_high : nz(preny_high, high)
+use_low  = frozen ? snap_low  : nz(preny_low,  low)
+use_amp  = use_high - use_low
+
+// Ordre chronologique (dynamique avant figement)
+use_high_bar = frozen ? snap_high_bar : preny_high_bar
+use_low_bar  = frozen ? snap_low_bar  : preny_low_bar
+
+// fibo_start/end dynamiques (avant figement)
+d_fibo_start = nz(use_high_bar, bar_index) <= nz(use_low_bar, bar_index) ? use_high : use_low
+d_fibo_end   = nz(use_high_bar, bar_index) <= nz(use_low_bar, bar_index) ? use_low  : use_high
+
+f_start = frozen ? fibo_start : d_fibo_start
+f_end   = frozen ? fibo_end   : d_fibo_end
+
+// Direction : fibo_start -> fibo_end
+// Si start=High, end=Low -> direction DOWN -> retracements AU-DESSUS du Low
+// Si start=Low,  end=High-> direction UP   -> retracements EN-DESSOUS du High
+is_down = f_start >= f_end   // High->Low = descendant
+
+// ── Calcul des niveaux Fibo ───────────────────────────────────────────────────
+// Retracements : de f_end vers f_start (contre-tendance depuis l'extreme final)
+//   DOWN (f_start=High, f_end=Low) : 38.2% = Low + range*0.382 (proche du Low) ✓
+//   UP   (f_start=Low,  f_end=High): 38.2% = High - range*0.382 (proche du High) ✓
+//
+// Extensions : au-dela de f_end dans le sens de la tendance
+//   DOWN : 127.2% = Low - range*0.272 (sous le Low) ✓
+//   UP   : 127.2% = High + range*0.272 (au-dessus du High) ✓
+
+f_ret(pct) =>
+    f_end + (f_start - f_end) * pct
+
+f_ext(pct) =>
+    f_end + (f_end - f_start) * (pct - 1)
+
+p_p0    = f_end    // 0% = extremite recente = depart des retracements
+p_p100  = f_start  // 100% = extremite ancienne = retracement complet
+p_r382  = f_ret(0.382)
+p_r500  = f_ret(0.500)
+p_r618  = f_ret(0.618)
+p_r786  = f_ret(0.786)
+p_e1272 = f_ext(1.272)
+p_e1618 = f_ext(1.618)
+p_e200  = f_ext(2.000)
+
+// ── Tracé via line.new() ──────────────────────────────────────────────────────
+// Affichage depuis 7h Paris jusqu'a la fin de session
+paris_7h_utc = f_is_cest(time) ? 5 * 60 : 6 * 60
+show_lvl     = utc_total >= paris_7h_utc and utc_total < day_end
+
+f_lbl(name, price, col) =>
+    label.new(bar_index + 2, price,
+              name + " - " + str.tostring(math.round(price, 2)),
+              style     = label.style_label_left,
+              color     = color.new(color.white, 100),
+              textcolor = col,
+              size      = size.small)
+
+if show_lvl
+    if not frozen or not session_started
+        // Periode dynamique (niveaux qui bougent) OU premier appel en periode figee :
+        // delete + recreate pour garantir y1 = y2 = niveau correct (ligne horizontale)
+        session_started := true
+        line.delete(ln_p0)
+        line.delete(ln_p100)
+        line.delete(ln_r382)
+        line.delete(ln_r500)
+        line.delete(ln_r618)
+        line.delete(ln_r786)
+        line.delete(ln_e1272)
+        line.delete(ln_e1618)
+        line.delete(ln_e200)
+        line.delete(ln_high)
+        line.delete(ln_low)
+        label.delete(lbl_p0)
+        label.delete(lbl_p100)
+        label.delete(lbl_r382)
+        label.delete(lbl_r500)
+        label.delete(lbl_r618)
+        label.delete(lbl_r786)
+        label.delete(lbl_e1272)
+        label.delete(lbl_e1618)
+        label.delete(lbl_e200)
+        label.delete(lbl_high)
+        label.delete(lbl_low)
+        ln_p0    := show_p0    ? line.new(day_start_bar, p_p0,    bar_index, p_p0,    color=col_p0,    width=wid_p0,    style=f_linestyle(sty_p0),    extend=extend.none) : na
+        ln_p100  := show_p100  ? line.new(day_start_bar, p_p100,  bar_index, p_p100,  color=col_p100,  width=wid_p100,  style=f_linestyle(sty_p100),  extend=extend.none) : na
+        ln_r382  := show_r382  ? line.new(day_start_bar, p_r382,  bar_index, p_r382,  color=col_r382,  width=wid_r382,  style=f_linestyle(sty_r382),  extend=extend.none) : na
+        ln_r500  := show_r500  ? line.new(day_start_bar, p_r500,  bar_index, p_r500,  color=col_r500,  width=wid_r500,  style=f_linestyle(sty_r500),  extend=extend.none) : na
+        ln_r618  := show_r618  ? line.new(day_start_bar, p_r618,  bar_index, p_r618,  color=col_r618,  width=wid_r618,  style=f_linestyle(sty_r618),  extend=extend.none) : na
+        ln_r786  := show_r786  ? line.new(day_start_bar, p_r786,  bar_index, p_r786,  color=col_r786,  width=wid_r786,  style=f_linestyle(sty_r786),  extend=extend.none) : na
+        ln_e1272 := show_e1272 ? line.new(day_start_bar, p_e1272, bar_index, p_e1272, color=col_e1272, width=wid_e1272, style=f_linestyle(sty_e1272), extend=extend.none) : na
+        ln_e1618 := show_e1618 ? line.new(day_start_bar, p_e1618, bar_index, p_e1618, color=col_e1618, width=wid_e1618, style=f_linestyle(sty_e1618), extend=extend.none) : na
+        ln_e200  := show_e200  ? line.new(day_start_bar, p_e200,  bar_index, p_e200,  color=col_e200,  width=wid_e200,  style=f_linestyle(sty_e200),  extend=extend.none) : na
+        ln_high  := line.new(day_start_bar, use_high, bar_index, use_high, color=color.new(color.white, 60), width=1, extend=extend.none)
+        ln_low   := line.new(day_start_bar, use_low,  bar_index, use_low,  color=color.new(color.white, 60), width=1, extend=extend.none)
+        lbl_p0    := show_p0    ? f_lbl("0%",        p_p0,    col_p0)    : na
+        lbl_p100  := show_p100  ? f_lbl("100%",      p_p100,  col_p100)  : na
+        lbl_r382  := show_r382  ? f_lbl("38.2%",    p_r382,  col_r382)  : na
+        lbl_r500  := show_r500  ? f_lbl("50.0%",    p_r500,  col_r500)  : na
+        lbl_r618  := show_r618  ? f_lbl("61.8%",    p_r618,  col_r618)  : na
+        lbl_r786  := show_r786  ? f_lbl("78.6%",    p_r786,  col_r786)  : na
+        lbl_e1272 := show_e1272 ? f_lbl("127.2%",   p_e1272, col_e1272) : na
+        lbl_e1618 := show_e1618 ? f_lbl("161.8%",   p_e1618, col_e1618) : na
+        lbl_e200  := show_e200  ? f_lbl("200.0%",   p_e200,  col_e200)  : na
+        lbl_high  := f_lbl("High", use_high, color.new(color.white, 60))
+        lbl_low   := f_lbl("Low",  use_low,  color.new(color.white, 60))
+    else
+        // Periode figee, extension seulement (pattern DWM) : y ne change plus
+        if not na(ln_p0)
+            line.set_x2(ln_p0,    bar_index)
+            line.set_y2(ln_p0,    p_p0)
+        if not na(ln_p100)
+            line.set_x2(ln_p100,  bar_index)
+            line.set_y2(ln_p100,  p_p100)
+        if not na(ln_r382)
+            line.set_x2(ln_r382,  bar_index)
+            line.set_y2(ln_r382,  p_r382)
+        if not na(ln_r500)
+            line.set_x2(ln_r500,  bar_index)
+            line.set_y2(ln_r500,  p_r500)
+        if not na(ln_r618)
+            line.set_x2(ln_r618,  bar_index)
+            line.set_y2(ln_r618,  p_r618)
+        if not na(ln_r786)
+            line.set_x2(ln_r786,  bar_index)
+            line.set_y2(ln_r786,  p_r786)
+        if not na(ln_e1272)
+            line.set_x2(ln_e1272, bar_index)
+            line.set_y2(ln_e1272, p_e1272)
+        if not na(ln_e1618)
+            line.set_x2(ln_e1618, bar_index)
+            line.set_y2(ln_e1618, p_e1618)
+        if not na(ln_e200)
+            line.set_x2(ln_e200,  bar_index)
+            line.set_y2(ln_e200,  p_e200)
+        if not na(ln_high)
+            line.set_x2(ln_high,  bar_index)
+            line.set_y2(ln_high,  use_high)
+        if not na(ln_low)
+            line.set_x2(ln_low,   bar_index)
+            line.set_y2(ln_low,   use_low)
+        if not na(lbl_p0)
+            label.set_x(lbl_p0,    bar_index + 2)
+        if not na(lbl_p100)
+            label.set_x(lbl_p100,  bar_index + 2)
+        if not na(lbl_r382)
+            label.set_x(lbl_r382,  bar_index + 2)
+        if not na(lbl_r500)
+            label.set_x(lbl_r500,  bar_index + 2)
+        if not na(lbl_r618)
+            label.set_x(lbl_r618,  bar_index + 2)
+        if not na(lbl_r786)
+            label.set_x(lbl_r786,  bar_index + 2)
+        if not na(lbl_e1272)
+            label.set_x(lbl_e1272, bar_index + 2)
+        if not na(lbl_e1618)
+            label.set_x(lbl_e1618, bar_index + 2)
+        if not na(lbl_e200)
+            label.set_x(lbl_e200,  bar_index + 2)
+        if not na(lbl_high)
+            label.set_x(lbl_high,  bar_index + 2)
+        if not na(lbl_low)
+            label.set_x(lbl_low,   bar_index + 2)
+else
+    // Hors fenetre : supprimer les lignes et labels
+    session_started := false
+    line.delete(ln_p0)
+    line.delete(ln_p100)
+    line.delete(ln_r382)
+    line.delete(ln_r500)
+    line.delete(ln_r618)
+    line.delete(ln_r786)
+    line.delete(ln_e1272)
+    line.delete(ln_e1618)
+    line.delete(ln_e200)
+    line.delete(ln_high)
+    line.delete(ln_low)
+    ln_p0    := na
+    ln_p100  := na
+    ln_r382  := na
+    ln_r500  := na
+    ln_r618  := na
+    ln_r786  := na
+    ln_e1272 := na
+    ln_e1618 := na
+    ln_e200  := na
+    ln_high  := na
+    ln_low   := na
+    label.delete(lbl_p0)
+    label.delete(lbl_p100)
+    label.delete(lbl_r382)
+    label.delete(lbl_r500)
+    label.delete(lbl_r618)
+    label.delete(lbl_r786)
+    label.delete(lbl_e1272)
+    label.delete(lbl_e1618)
+    label.delete(lbl_e200)
+    label.delete(lbl_high)
+    label.delete(lbl_low)
+    lbl_p0    := na
+    lbl_p100  := na
+    lbl_r382  := na
+    lbl_r500  := na
+    lbl_r618  := na
+    lbl_r786  := na
+    lbl_e1272 := na
+    lbl_e1618 := na
+    lbl_e200  := na
+    lbl_high  := na
+    lbl_low   := na
+
+// ── Midnight NY Open ─────────────────────────────────────────────────────────
+mid_tz_id     = f_tz(mid_tz)
+mid_cur_hour  = hour(time, mid_tz_id)
+mid_cur_min   = minute(time, mid_tz_id)
+is_mid_bar    = mid_cur_hour == mid_hour and mid_cur_min == mid_minute
+mid_open_raw  = request.security(syminfo.tickerid, "1", is_mid_bar ? open : na, lookahead=barmerge.lookahead_on)
+new_midnight  = not na(mid_open_raw)
+
+if new_midnight
+    mid_open := mid_open_raw
+
+if show_mid and not na(mid_open)
+    if new_midnight
+        line.delete(ln_midnight)
+        label.delete(lbl_midnight)
+        ln_midnight  := line.new(bar_index, mid_open, bar_index + 1, mid_open,
+             color=col_mid, width=wid_mid, style=f_linestyle(sty_mid), extend=extend.none)
+        lbl_midnight := label.new(bar_index + 2, mid_open,
+             "Midnight NY - " + str.tostring(math.round(mid_open, 2)),
+             style=label.style_label_left, color=color.new(color.white, 100),
+             textcolor=col_mid, size=size.small)
+    else
+        if not na(ln_midnight)
+            line.set_x2(ln_midnight, bar_index)
+            line.set_y2(ln_midnight, mid_open)
+        if not na(lbl_midnight)
+            label.set_x(lbl_midnight, bar_index + 2)
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+if show_dash and barstate.islast
+    dir_str = is_down ? "DOWN  ▼" : "UP  ▲"
+    dir_col = is_down ? color.new(#ff7b72, 0) : color.new(#3fb950, 0)
+    amp_str = str.tostring(math.round(use_amp, 1)) + " pts"
+
+    // Amplitude mini = moyenne des 5 intervalles entre niveaux consecutifs
+    // 0->38.2 + 38.2->50 + 50->61.8 + 61.8->78.6 + 78.6->100 = 100% / 5 segments
+    amp_mini_val = use_amp / 5
+    amp_mini = str.tostring(math.round(amp_mini_val, 0)) + " pts"
+    amp_norm = str.tostring(math.round(amp_mini_val * 1.5, 0)) + " pts"
+    amp_safe = str.tostring(math.round(amp_mini_val * 2.0, 0)) + " pts"
+
+    frz_str = frozen ? "Fige" : "Dynamique"
+    frz_col = frozen ? color.new(#1a7a1a, 0) : color.new(#e3b341, 0)
+
+    var table t = table.new(
+         position.bottom_right, 3, 5,
+         bgcolor      = color.new(color.gray, 85),
+         border_width = 0)
+
+    table.cell(t, 0, 0, "Direction Pre-NY", text_color=color.gray,             text_size=size.small, text_halign=text.align_left)
+    table.cell(t, 1, 0, dir_str,            text_color=dir_col,                text_size=size.small)
+    table.cell(t, 2, 0, frz_str,            text_color=frz_col,                text_size=size.small)
+
+    table.cell(t, 0, 1, "Amplitude Pre-NY", text_color=color.gray,             text_size=size.small, text_halign=text.align_left)
+    table.cell(t, 1, 1, amp_str,            text_color=dir_col,                text_size=size.small)
+    table.cell(t, 2, 1, "", text_size=size.small)
+
+    table.cell(t, 0, 2, "Amplitude mini",   text_color=color.gray,             text_size=size.small, text_halign=text.align_left)
+    table.cell(t, 1, 2, amp_mini,           text_color=color.red,              text_size=size.small)
+    table.cell(t, 2, 2, "", text_size=size.small)
+
+    table.cell(t, 0, 3, "Amplitude normale", text_color=color.gray,            text_size=size.small, text_halign=text.align_left)
+    table.cell(t, 1, 3, amp_norm,            text_color=color.new(#1a7a1a, 0), text_size=size.small)
+    table.cell(t, 2, 3, "x1.5",             text_color=color.gray,            text_size=size.small)
+
+    table.cell(t, 0, 4, "Amplitude safe",   text_color=color.gray,            text_size=size.small, text_halign=text.align_left)
+    table.cell(t, 1, 4, amp_safe,           text_color=color.new(#1a3a7a, 0), text_size=size.small)
+    table.cell(t, 2, 4, "x2.0",            text_color=color.gray,            text_size=size.small)
