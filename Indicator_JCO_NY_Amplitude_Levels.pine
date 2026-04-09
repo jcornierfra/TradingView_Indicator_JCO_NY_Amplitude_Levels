@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 1.0
+// Version: 1.1
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -16,8 +16,11 @@
 //              - Dashboard: direction (UP/DOWN), frozen state, amplitude Pre-NY,
 //                amplitude mini / normale / safe (x1.5 / x2.0 of mini)
 //              - Visible from 7h Paris until end of NY PM session
+//              - Midnight label auto-offset when close to a Fibo level
 //
 // Changelog:
+//   v1.1 - 2026-04-09
+//     - Midnight NY label automatically offset when overlapping a Fibo level
 //   v1.0 - 2026-04-07
 //     - Initial release
 
@@ -133,6 +136,13 @@ f_day_end_min(t) =>
 // Conversion style string -> line.style
 f_linestyle(s) =>
     s == "dashed" ? line.style_dashed : s == "dotted" ? line.style_dotted : line.style_solid
+
+// Proximite entre deux prix - seuil en pourcentage
+f_is_close(float price1, float price2, float threshold_pct) =>
+    if na(price1) or na(price2)
+        false
+    else
+        math.abs(price1 - price2) / math.max(price1, price2) * 100 < threshold_pct
 
 // Timezone string -> IANA identifier
 f_tz(tz) =>
@@ -521,6 +531,21 @@ else
     lbl_high  := na
     lbl_low   := na
 
+// ── Decalage label midnight - evite le recouvrement avec les labels Fibo ─────
+mid_offset = 2
+if not na(mid_open)
+    mid_close_to_fibo = (show_p0    and f_is_close(mid_open, p_p0,    0.15)) or
+         (show_p100  and f_is_close(mid_open, p_p100,  0.15)) or
+         (show_r382  and f_is_close(mid_open, p_r382,  0.15)) or
+         (show_r500  and f_is_close(mid_open, p_r500,  0.15)) or
+         (show_r618  and f_is_close(mid_open, p_r618,  0.15)) or
+         (show_r786  and f_is_close(mid_open, p_r786,  0.15)) or
+         (show_e1272 and f_is_close(mid_open, p_e1272, 0.15)) or
+         (show_e1618 and f_is_close(mid_open, p_e1618, 0.15)) or
+         (show_e200  and f_is_close(mid_open, p_e200,  0.15))
+    if mid_close_to_fibo
+        mid_offset += 14
+
 // ── Midnight NY Open ─────────────────────────────────────────────────────────
 mid_tz_id     = f_tz(mid_tz)
 mid_cur_hour  = hour(time, mid_tz_id)
@@ -538,7 +563,7 @@ if show_mid and not na(mid_open)
         label.delete(lbl_midnight)
         ln_midnight  := line.new(bar_index, mid_open, bar_index + 1, mid_open,
              color=col_mid, width=wid_mid, style=f_linestyle(sty_mid), extend=extend.none)
-        lbl_midnight := label.new(bar_index + 2, mid_open,
+        lbl_midnight := label.new(bar_index + mid_offset, mid_open,
              "Midnight NY - " + str.tostring(math.round(mid_open, 2)),
              style=label.style_label_left, color=color.new(color.white, 100),
              textcolor=col_mid, size=size.small)
@@ -547,7 +572,7 @@ if show_mid and not na(mid_open)
             line.set_x2(ln_midnight, bar_index)
             line.set_y2(ln_midnight, mid_open)
         if not na(lbl_midnight)
-            label.set_x(lbl_midnight, bar_index + 2)
+            label.set_x(lbl_midnight, bar_index + mid_offset)
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 if show_dash and barstate.islast

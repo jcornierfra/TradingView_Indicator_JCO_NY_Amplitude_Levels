@@ -117,6 +117,18 @@ Chaque niveau (127.2%, 161.8%, 200%) est configurable indépendamment.
 
 ---
 
+## Changelog
+
+### v1.1 - 2026-04-09
+
+- Midnight NY label automatically offset when it overlaps a Fibo level
+
+### v1.0 - 2026-04-07
+
+- Initial release
+
+---
+
 ## Licence
 
 [Mozilla Public License 2.0](https://mozilla.org/MPL/2.0/)
