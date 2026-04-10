@@ -534,15 +534,15 @@ else
 // ── Decalage label midnight - evite le recouvrement avec les labels Fibo ─────
 mid_offset = 2
 if not na(mid_open)
-    mid_close_to_fibo = (show_p0    and f_is_close(mid_open, p_p0,    0.15)) or
-         (show_p100  and f_is_close(mid_open, p_p100,  0.15)) or
-         (show_r382  and f_is_close(mid_open, p_r382,  0.15)) or
-         (show_r500  and f_is_close(mid_open, p_r500,  0.15)) or
-         (show_r618  and f_is_close(mid_open, p_r618,  0.15)) or
-         (show_r786  and f_is_close(mid_open, p_r786,  0.15)) or
-         (show_e1272 and f_is_close(mid_open, p_e1272, 0.15)) or
-         (show_e1618 and f_is_close(mid_open, p_e1618, 0.15)) or
-         (show_e200  and f_is_close(mid_open, p_e200,  0.15))
+    mid_close_to_fibo = (show_p0    and f_is_close(mid_open, p_p0,    0.03)) or
+         (show_p100  and f_is_close(mid_open, p_p100,  0.03)) or
+         (show_r382  and f_is_close(mid_open, p_r382,  0.03)) or
+         (show_r500  and f_is_close(mid_open, p_r500,  0.03)) or
+         (show_r618  and f_is_close(mid_open, p_r618,  0.03)) or
+         (show_r786  and f_is_close(mid_open, p_r786,  0.03)) or
+         (show_e1272 and f_is_close(mid_open, p_e1272, 0.03)) or
+         (show_e1618 and f_is_close(mid_open, p_e1618, 0.03)) or
+         (show_e200  and f_is_close(mid_open, p_e200,  0.03))
     if mid_close_to_fibo
         mid_offset += 14
 
