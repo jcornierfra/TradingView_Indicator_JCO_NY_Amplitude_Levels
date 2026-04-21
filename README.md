@@ -4,7 +4,7 @@
 
 Indicateur TradingView Pine Script v6 pour le scalp contrarien sur NQ Futures (Nasdaq 100).
 
-Il trace les niveaux de Fibonacci basés sur le range Pre-NY (ouverture CME Globex → ouverture NY AM), avec dashboard d'amplitude intégré.
+Il trace les niveaux de Fibonacci basés sur le range Pre-NY (ouverture CME Globex → ouverture NY AM), avec dashboard d'amplitude intégré incluant une recommandation d'amplitude par niveau de risque basée sur les statistiques NQ 2024–2026.
 
 ---
 
@@ -57,13 +57,17 @@ Ligne horizontale au prix d'ouverture de la barre 0h00 NY (configurable). Utile 
 
 Affiché en bas à droite du graphique :
 
-| Ligne             | Valeur                           | Description                           |
-|-------------------|----------------------------------|---------------------------------------|
-| Direction Pre-NY  | UP / DOWN + Dynamique/Fige       | Direction du range et etat            |
-| Amplitude Pre-NY  | ex. 838 pts                      | Range total High-Low                  |
-| Amplitude mini    | ex. 168 pts                      | Range / 5 (moyenne des 5 intervalles) |
-| Amplitude normale | ex. 251 pts (x1.5)               | Amplitude mini x 1.5                  |
-| Amplitude safe    | ex. 335 pts (x2.0)               | Amplitude mini x 2.0                  |
+| Ligne            | Colonnes                                          | Description                                        |
+|------------------|---------------------------------------------------|----------------------------------------------------|
+| Direction Pre-NY | UP / DOWN — Jour — Dynamique/Figé                 | Direction, jour de la semaine, état                |
+| Amplitude Pre-NY | ex. 121 pts                                       | Range total High–Low                               |
+| Faible P90       | 10% dép. — Ratio — Amp. NY — **Amp. Reco**        | 10% des jours dépassent cette amplitude            |
+| Modéré P75       | 25% dép. — Ratio — Amp. NY — **Amp. Reco**        | 25% des jours dépassent cette amplitude            |
+| Fort P50         | 50% dép. — Ratio — Amp. NY — **Amp. Reco**        | 50% des jours dépassent cette amplitude            |
+
+Les ratios et l'amplitude recommandée sont calculés par jour de la semaine à partir des percentiles P90/P75/P50 issus des statistiques NQ (2 jan. 2024 – 2 avr. 2026, 581 jours).
+
+**Formule amplitude recommandée** : `round(0.1965 × ratio × Amplitude Pre-NY)` — 0.1965 étant la moyenne des 4 distances inter-niveaux Fibo (0→38.2→50→61.8→78.6%).
 
 ---
 
@@ -74,7 +78,7 @@ Affiché en bas à droite du graphique :
 - **Heure debut NY AM (Paris)** : heure d'ouverture NY en heure de Paris (défaut : 15)
 - **Minute debut NY AM** : minute (défaut : 30)
 
-### Dashboard
+### Paramètres Dashboard
 
 - **Afficher le dashboard** : afficher/masquer le dashboard
 
@@ -91,7 +95,7 @@ Chaque niveau (0%, 100%, 38.2%, 50%, 61.8%, 78.6%) est configurable indépendamm
 
 Chaque niveau (127.2%, 161.8%, 200%) est configurable indépendamment.
 
-### Midnight NY Open
+### Paramètres Midnight NY Open
 
 - Afficher/masquer la ligne
 - Couleur, épaisseur, style
@@ -118,6 +122,12 @@ Chaque niveau (127.2%, 161.8%, 200%) est configurable indépendamment.
 ---
 
 ## Changelog
+
+### v1.2 - 2026-04-21
+
+- Dashboard : amplitude recommandée par niveau de risque (Faible P90 / Modéré P75 / Fort P50)
+- Dashboard : ratio et amplitude NY estimée affichés par niveau, basés sur les stats NQ 2024–2026
+- Dashboard : jour de la semaine détecté automatiquement
 
 ### v1.1 - 2026-04-09
 

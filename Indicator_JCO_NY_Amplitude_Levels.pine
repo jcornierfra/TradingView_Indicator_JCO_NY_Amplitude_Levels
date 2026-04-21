@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 1.1
+// Version: 1.2
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -13,12 +13,17 @@
 //              - Extensions: 127.2% / 161.8% / 200%
 //              - Labels on each line with level name and price value
 //              - Midnight NY Open horizontal line (configurable timezone and time)
-//              - Dashboard: direction (UP/DOWN), frozen state, amplitude Pre-NY,
-//                amplitude mini / normale / safe (x1.5 / x2.0 of mini)
+//              - Dashboard: direction (UP/DOWN), jour de la semaine, etat fige/dynamique,
+//                amplitude Pre-NY, amplitude NY estimee et recommandee par niveau de risque
+//                (Faible P90 / Modere P75 / Fort P50) base sur stats NQ 2024-2026
 //              - Visible from 7h Paris until end of NY PM session
 //              - Midnight label auto-offset when close to a Fibo level
 //
 // Changelog:
+//   v1.2 - 2026-04-21
+//     - Dashboard: amplitude recommandee par niveau de risque (Faible/Modere/Fort)
+//       basee sur les percentiles P90/P75/P50 par jour de la semaine (stats NQ 2024-2026)
+//     - Dashboard: ajout Amplitude NY estimee, ratio, jour de la semaine detecte automatiquement
 //   v1.1 - 2026-04-09
 //     - Midnight NY label automatically offset when overlapping a Fibo level
 //   v1.0 - 2026-04-07
@@ -575,42 +580,82 @@ if show_mid and not na(mid_open)
             label.set_x(lbl_midnight, bar_index + mid_offset)
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
+// Ratios NY/PreNY par jour (0=Lun..4=Ven) issus des statistiques NQ 2024-2026
+// Source : Calculatrice Xeilos — Option B percentiles par jour de la semaine
+p50r = array.from(0.65, 0.77, 0.78, 0.78, 0.70)  // 50% des jours depassent
+p75r = array.from(0.92, 1.02, 1.22, 1.03, 0.90)  // 25% des jours depassent
+p90r = array.from(1.27, 1.26, 1.79, 1.33, 1.42)  // 10% des jours depassent
+// Amplitude recommandee = moyenne des 4 distances inter-niveaux Fibo (0/38.2/50/61.8/78.6)
+// FIBO_COEFF = (0.382 + 0.118 + 0.118 + 0.168) / 4 = 0.1965
+FIBO_COEFF = 0.1965
+
+// Jour de la semaine → index 0-4 (week-end → Lundi par defaut)
+dow_raw  = dayofweek(time)
+dow_idx  = dow_raw == 2 ? 0 : dow_raw == 3 ? 1 : dow_raw == 4 ? 2 : dow_raw == 5 ? 3 : dow_raw == 6 ? 4 : 0
+dow_name = dow_raw == 2 ? "Lundi" : dow_raw == 3 ? "Mardi" : dow_raw == 4 ? "Mercredi" : dow_raw == 5 ? "Jeudi" : dow_raw == 6 ? "Vendredi" : "Lundi"
+
+ratio_faible = array.get(p90r, dow_idx)
+ratio_modere = array.get(p75r, dow_idx)
+ratio_fort   = array.get(p50r, dow_idx)
+
+amp_ny_faible   = ratio_faible * use_amp
+amp_ny_modere   = ratio_modere * use_amp
+amp_ny_fort     = ratio_fort   * use_amp
+
+amp_reco_faible = math.round(FIBO_COEFF * amp_ny_faible)
+amp_reco_modere = math.round(FIBO_COEFF * amp_ny_modere)
+amp_reco_fort   = math.round(FIBO_COEFF * amp_ny_fort)
+
 if show_dash and barstate.islast
     dir_str = is_down ? "DOWN  ▼" : "UP  ▲"
     dir_col = is_down ? color.new(#ff7b72, 0) : color.new(#3fb950, 0)
     amp_str = str.tostring(math.round(use_amp, 1)) + " pts"
-
-    // Amplitude mini = moyenne des 5 intervalles entre niveaux consecutifs
-    // 0->38.2 + 38.2->50 + 50->61.8 + 61.8->78.6 + 78.6->100 = 100% / 5 segments
-    amp_mini_val = use_amp / 5
-    amp_mini = str.tostring(math.round(amp_mini_val, 0)) + " pts"
-    amp_norm = str.tostring(math.round(amp_mini_val * 1.5, 0)) + " pts"
-    amp_safe = str.tostring(math.round(amp_mini_val * 2.0, 0)) + " pts"
-
     frz_str = frozen ? "Fige" : "Dynamique"
     frz_col = frozen ? color.new(#1a7a1a, 0) : color.new(#e3b341, 0)
 
     var table t = table.new(
-         position.bottom_right, 3, 5,
+         position.bottom_right, 5, 6,
          bgcolor      = color.new(color.gray, 85),
          border_width = 0)
 
-    table.cell(t, 0, 0, "Direction Pre-NY", text_color=color.gray,             text_size=size.small, text_halign=text.align_left)
-    table.cell(t, 1, 0, dir_str,            text_color=dir_col,                text_size=size.small)
-    table.cell(t, 2, 0, frz_str,            text_color=frz_col,                text_size=size.small)
+    // Ligne 0 : Direction + Jour + Etat
+    table.cell(t, 0, 0, "Direction Pre-NY", text_color=color.gray,            text_size=size.small, text_halign=text.align_left)
+    table.cell(t, 1, 0, dir_str,            text_color=dir_col,               text_size=size.small)
+    table.cell(t, 2, 0, "",                 text_size=size.small)
+    table.cell(t, 3, 0, dow_name,           text_color=color.gray,            text_size=size.small)
+    table.cell(t, 4, 0, frz_str,            text_color=frz_col,               text_size=size.small)
 
-    table.cell(t, 0, 1, "Amplitude Pre-NY", text_color=color.gray,             text_size=size.small, text_halign=text.align_left)
-    table.cell(t, 1, 1, amp_str,            text_color=dir_col,                text_size=size.small)
-    table.cell(t, 2, 1, "", text_size=size.small)
+    // Ligne 1 : Amplitude Pre-NY
+    table.cell(t, 0, 1, "Amplitude Pre-NY", text_color=color.gray,            text_size=size.small, text_halign=text.align_left)
+    table.cell(t, 1, 1, amp_str,            text_color=dir_col,               text_size=size.small)
+    table.cell(t, 2, 1, "",                 text_size=size.small)
+    table.cell(t, 3, 1, "",                 text_size=size.small)
+    table.cell(t, 4, 1, "",                 text_size=size.small)
 
-    table.cell(t, 0, 2, "Amplitude mini",   text_color=color.gray,             text_size=size.small, text_halign=text.align_left)
-    table.cell(t, 1, 2, amp_mini,           text_color=color.red,              text_size=size.small)
-    table.cell(t, 2, 2, "", text_size=size.small)
+    // Ligne 2 : En-tetes colonnes
+    table.cell(t, 0, 2, "Risque",     text_color=color.gray, text_size=size.small, text_halign=text.align_left)
+    table.cell(t, 1, 2, "% dep.",     text_color=color.gray, text_size=size.small)
+    table.cell(t, 2, 2, "Ratio",      text_color=color.gray, text_size=size.small)
+    table.cell(t, 3, 2, "Amp. NY",    text_color=color.gray, text_size=size.small)
+    table.cell(t, 4, 2, "Amp. Reco",  text_color=color.gray, text_size=size.small)
 
-    table.cell(t, 0, 3, "Amplitude normale", text_color=color.gray,            text_size=size.small, text_halign=text.align_left)
-    table.cell(t, 1, 3, amp_norm,            text_color=color.new(#1a7a1a, 0), text_size=size.small)
-    table.cell(t, 2, 3, "x1.5",             text_color=color.gray,            text_size=size.small)
+    // Ligne 3 : Faible (P90) — 10% des jours depassent cette amplitude
+    table.cell(t, 0, 3, "Faible P90", text_color=color.new(#3fb950, 0),        text_size=size.small, text_halign=text.align_left)
+    table.cell(t, 1, 3, "10%",        text_color=color.gray,                    text_size=size.small)
+    table.cell(t, 2, 3, str.tostring(ratio_faible, "#.00") + "x",              text_color=color.gray,            text_size=size.small)
+    table.cell(t, 3, 3, str.tostring(math.round(amp_ny_faible)) + " pts",      text_color=color.gray,            text_size=size.small)
+    table.cell(t, 4, 3, str.tostring(amp_reco_faible) + " pts",                text_color=color.new(#3fb950, 0), text_size=size.small)
 
-    table.cell(t, 0, 4, "Amplitude safe",   text_color=color.gray,            text_size=size.small, text_halign=text.align_left)
-    table.cell(t, 1, 4, amp_safe,           text_color=color.new(#1a3a7a, 0), text_size=size.small)
-    table.cell(t, 2, 4, "x2.0",            text_color=color.gray,            text_size=size.small)
+    // Ligne 4 : Modere (P75) — 25% des jours depassent cette amplitude
+    table.cell(t, 0, 4, "Modere P75", text_color=color.new(#e3b341, 0),        text_size=size.small, text_halign=text.align_left)
+    table.cell(t, 1, 4, "25%",        text_color=color.gray,                    text_size=size.small)
+    table.cell(t, 2, 4, str.tostring(ratio_modere, "#.00") + "x",              text_color=color.gray,            text_size=size.small)
+    table.cell(t, 3, 4, str.tostring(math.round(amp_ny_modere)) + " pts",      text_color=color.gray,            text_size=size.small)
+    table.cell(t, 4, 4, str.tostring(amp_reco_modere) + " pts",                text_color=color.new(#e3b341, 0), text_size=size.small)
+
+    // Ligne 5 : Fort (P50) — 50% des jours depassent cette amplitude
+    table.cell(t, 0, 5, "Fort   P50", text_color=color.new(#ff7b72, 0),        text_size=size.small, text_halign=text.align_left)
+    table.cell(t, 1, 5, "50%",        text_color=color.gray,                    text_size=size.small)
+    table.cell(t, 2, 5, str.tostring(ratio_fort, "#.00") + "x",                text_color=color.gray,            text_size=size.small)
+    table.cell(t, 3, 5, str.tostring(math.round(amp_ny_fort)) + " pts",        text_color=color.gray,            text_size=size.small)
+    table.cell(t, 4, 5, str.tostring(amp_reco_fort) + " pts",                  text_color=color.new(#ff7b72, 0), text_size=size.small)
