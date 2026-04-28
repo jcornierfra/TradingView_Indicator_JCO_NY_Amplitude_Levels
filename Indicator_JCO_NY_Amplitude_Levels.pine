@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 1.2
+// Version: 1.3
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -20,6 +20,8 @@
 //              - Midnight label auto-offset when close to a Fibo level
 //
 // Changelog:
+//   v1.3 - 2026-04-28
+//     - Suppression des lignes guides High/Low (redondantes avec les niveaux 0% et 100%)
 //   v1.2 - 2026-04-21
 //     - Dashboard: amplitude recommandee par niveau de risque (Faible/Modere/Fort)
 //       basee sur les percentiles P90/P75/P50 par jour de la semaine (stats NQ 2024-2026)
@@ -194,8 +196,6 @@ var line ln_r786  = na
 var line ln_e1272 = na
 var line ln_e1618 = na
 var line ln_e200  = na
-var line ln_high  = na
-var line ln_low   = na
 
 var label lbl_p0    = na
 var label lbl_p100  = na
@@ -206,8 +206,6 @@ var label lbl_r786  = na
 var label lbl_e1272 = na
 var label lbl_e1618 = na
 var label lbl_e200  = na
-var label lbl_high  = na
-var label lbl_low   = na
 
 var bool session_started = false
 
@@ -256,8 +254,6 @@ if is_new_day
     label.delete(lbl_e1272)
     label.delete(lbl_e1618)
     label.delete(lbl_e200)
-    label.delete(lbl_high)
-    label.delete(lbl_low)
     lbl_p0    := na
     lbl_p100  := na
     lbl_r382  := na
@@ -267,8 +263,6 @@ if is_new_day
     lbl_e1272 := na
     lbl_e1618 := na
     lbl_e200  := na
-    lbl_high  := na
-    lbl_low   := na
     line.delete(ln_p0)
     line.delete(ln_p100)
     line.delete(ln_r382)
@@ -278,8 +272,6 @@ if is_new_day
     line.delete(ln_e1272)
     line.delete(ln_e1618)
     line.delete(ln_e200)
-    line.delete(ln_high)
-    line.delete(ln_low)
     ln_p0    := na
     ln_p100  := na
     ln_r382  := na
@@ -289,8 +281,6 @@ if is_new_day
     ln_e1272 := na
     ln_e1618 := na
     ln_e200  := na
-    ln_high  := na
-    ln_low   := na
     session_started := false
     day_start_bar := bar_index
 
@@ -396,8 +386,6 @@ if show_lvl
         line.delete(ln_e1272)
         line.delete(ln_e1618)
         line.delete(ln_e200)
-        line.delete(ln_high)
-        line.delete(ln_low)
         label.delete(lbl_p0)
         label.delete(lbl_p100)
         label.delete(lbl_r382)
@@ -407,8 +395,6 @@ if show_lvl
         label.delete(lbl_e1272)
         label.delete(lbl_e1618)
         label.delete(lbl_e200)
-        label.delete(lbl_high)
-        label.delete(lbl_low)
         ln_p0    := show_p0    ? line.new(day_start_bar, p_p0,    bar_index, p_p0,    color=col_p0,    width=wid_p0,    style=f_linestyle(sty_p0),    extend=extend.none) : na
         ln_p100  := show_p100  ? line.new(day_start_bar, p_p100,  bar_index, p_p100,  color=col_p100,  width=wid_p100,  style=f_linestyle(sty_p100),  extend=extend.none) : na
         ln_r382  := show_r382  ? line.new(day_start_bar, p_r382,  bar_index, p_r382,  color=col_r382,  width=wid_r382,  style=f_linestyle(sty_r382),  extend=extend.none) : na
@@ -418,8 +404,6 @@ if show_lvl
         ln_e1272 := show_e1272 ? line.new(day_start_bar, p_e1272, bar_index, p_e1272, color=col_e1272, width=wid_e1272, style=f_linestyle(sty_e1272), extend=extend.none) : na
         ln_e1618 := show_e1618 ? line.new(day_start_bar, p_e1618, bar_index, p_e1618, color=col_e1618, width=wid_e1618, style=f_linestyle(sty_e1618), extend=extend.none) : na
         ln_e200  := show_e200  ? line.new(day_start_bar, p_e200,  bar_index, p_e200,  color=col_e200,  width=wid_e200,  style=f_linestyle(sty_e200),  extend=extend.none) : na
-        ln_high  := line.new(day_start_bar, use_high, bar_index, use_high, color=color.new(color.white, 60), width=1, extend=extend.none)
-        ln_low   := line.new(day_start_bar, use_low,  bar_index, use_low,  color=color.new(color.white, 60), width=1, extend=extend.none)
         lbl_p0    := show_p0    ? f_lbl("0%",        p_p0,    col_p0)    : na
         lbl_p100  := show_p100  ? f_lbl("100%",      p_p100,  col_p100)  : na
         lbl_r382  := show_r382  ? f_lbl("38.2%",    p_r382,  col_r382)  : na
@@ -429,8 +413,6 @@ if show_lvl
         lbl_e1272 := show_e1272 ? f_lbl("127.2%",   p_e1272, col_e1272) : na
         lbl_e1618 := show_e1618 ? f_lbl("161.8%",   p_e1618, col_e1618) : na
         lbl_e200  := show_e200  ? f_lbl("200.0%",   p_e200,  col_e200)  : na
-        lbl_high  := f_lbl("High", use_high, color.new(color.white, 60))
-        lbl_low   := f_lbl("Low",  use_low,  color.new(color.white, 60))
     else
         // Periode figee, extension seulement (pattern DWM) : y ne change plus
         if not na(ln_p0)
@@ -460,12 +442,6 @@ if show_lvl
         if not na(ln_e200)
             line.set_x2(ln_e200,  bar_index)
             line.set_y2(ln_e200,  p_e200)
-        if not na(ln_high)
-            line.set_x2(ln_high,  bar_index)
-            line.set_y2(ln_high,  use_high)
-        if not na(ln_low)
-            line.set_x2(ln_low,   bar_index)
-            line.set_y2(ln_low,   use_low)
         if not na(lbl_p0)
             label.set_x(lbl_p0,    bar_index + 2)
         if not na(lbl_p100)
@@ -484,10 +460,6 @@ if show_lvl
             label.set_x(lbl_e1618, bar_index + 2)
         if not na(lbl_e200)
             label.set_x(lbl_e200,  bar_index + 2)
-        if not na(lbl_high)
-            label.set_x(lbl_high,  bar_index + 2)
-        if not na(lbl_low)
-            label.set_x(lbl_low,   bar_index + 2)
 else
     // Hors fenetre : supprimer les lignes et labels
     session_started := false
@@ -500,8 +472,6 @@ else
     line.delete(ln_e1272)
     line.delete(ln_e1618)
     line.delete(ln_e200)
-    line.delete(ln_high)
-    line.delete(ln_low)
     ln_p0    := na
     ln_p100  := na
     ln_r382  := na
@@ -511,8 +481,6 @@ else
     ln_e1272 := na
     ln_e1618 := na
     ln_e200  := na
-    ln_high  := na
-    ln_low   := na
     label.delete(lbl_p0)
     label.delete(lbl_p100)
     label.delete(lbl_r382)
@@ -522,8 +490,6 @@ else
     label.delete(lbl_e1272)
     label.delete(lbl_e1618)
     label.delete(lbl_e200)
-    label.delete(lbl_high)
-    label.delete(lbl_low)
     lbl_p0    := na
     lbl_p100  := na
     lbl_r382  := na
@@ -533,8 +499,6 @@ else
     lbl_e1272 := na
     lbl_e1618 := na
     lbl_e200  := na
-    lbl_high  := na
-    lbl_low   := na
 
 // ── Decalage label midnight - evite le recouvrement avec les labels Fibo ─────
 mid_offset = 2

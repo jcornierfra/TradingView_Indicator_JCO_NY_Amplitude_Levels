@@ -123,6 +123,10 @@ Chaque niveau (127.2%, 161.8%, 200%) est configurable indépendamment.
 
 ## Changelog
 
+### v1.3 - 2026-04-28
+
+- Suppression des lignes guides High/Low (redondantes avec les niveaux 0% et 100% en orange)
+
 ### v1.2 - 2026-04-21
 
 - Dashboard : amplitude recommandée par niveau de risque (Faible P90 / Modéré P75 / Fort P50)
