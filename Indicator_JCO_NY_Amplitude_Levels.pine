@@ -1,25 +1,34 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 1.3
+// Version: 1.4
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
 //              range (CME Globex open to NY AM open) for contrarian scalping on NQ futures.
 //              Features include:
 //              - Pre-NY High/Low tracked from CME session open (22h UTC)
-//              - Levels dynamic until NY AM open (default 15h30 Paris), then frozen
-//              - Retracements: 0% / 38.2% / 50% / 61.8% / 78.6% / 100%
-//              - Extensions: 127.2% / 161.8% / 200%
+//              - BEFORE NY AM open (default 15h30 Paris) : dynamic Fibo levels
+//                - Retracements: 0% / 38.2% / 50% / 61.8% / 78.6% / 100%
+//                - Extensions: 127.2% / 161.8% / 200%
+//              - AFTER NY AM open : Fibo levels are removed and replaced by:
+//                - Day High and Day Low (orange lines, updated if NY breaks extremes)
+//                - Day 50% (green line at the midpoint of the day's range)
 //              - Labels on each line with level name and price value
 //              - Midnight NY Open horizontal line (configurable timezone and time)
 //              - Dashboard: direction (UP/DOWN), jour de la semaine, etat fige/dynamique,
 //                amplitude Pre-NY, amplitude NY estimee et recommandee par niveau de risque
 //                (Faible P90 / Modere P75 / Fort P50) base sur stats NQ 2024-2026
 //              - Visible from 7h Paris until end of NY PM session
-//              - Midnight label auto-offset when close to a Fibo level
+//              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v1.4 - 2026-04-28
+//     - Mode Post-NY : a partir de 15h30, les niveaux Fibo disparaissent et sont remplaces par
+//       3 lignes horizontales : Day High (orange), Day Low (orange), Day 50% (vert)
+//     - Day High/Low calcules sur la journee TradingView complete et mis a jour en temps reel
+//       si la session NY casse les extremes du Pre-NY
+//     - Nouveau groupe d'inputs "Mode Post-NY" pour configurer ces 3 lignes
 //   v1.3 - 2026-04-28
 //     - Suppression des lignes guides High/Low (redondantes avec les niveaux 0% et 100%)
 //   v1.2 - 2026-04-21
@@ -93,6 +102,24 @@ show_e200  = input.bool(true,  "200.0%", inline="e3", group=grp_ext)
 col_e200   = input.color(color.new(color.gray,  0),"", inline="e3", group=grp_ext)
 wid_e200   = input.int(1,"",minval=1,maxval=4,         inline="e3", group=grp_ext)
 sty_e200   = input.string("dotted","",options=["solid","dashed","dotted"], inline="e3", group=grp_ext)
+
+// ── Mode Post-NY (apres 15h30 : remplace les Fibo) ───────────────────────────
+grp_post = "Mode Post-NY (apres 15h30)"
+
+show_dh  = input.bool(true,  "Day High",   inline="dh", group=grp_post)
+col_dh   = input.color(color.new(color.orange, 0), "", inline="dh", group=grp_post)
+wid_dh   = input.int(1, "", minval=1, maxval=4,        inline="dh", group=grp_post)
+sty_dh   = input.string("solid", "", options=["solid","dashed","dotted"], inline="dh", group=grp_post)
+
+show_dl  = input.bool(true,  "Day Low",    inline="dl", group=grp_post)
+col_dl   = input.color(color.new(color.orange, 0), "", inline="dl", group=grp_post)
+wid_dl   = input.int(1, "", minval=1, maxval=4,        inline="dl", group=grp_post)
+sty_dl   = input.string("solid", "", options=["solid","dashed","dotted"], inline="dl", group=grp_post)
+
+show_dm  = input.bool(true,  "Day 50%",    inline="dm", group=grp_post)
+col_dm   = input.color(color.new(#1a7a1a, 0), "",      inline="dm", group=grp_post)
+wid_dm   = input.int(1, "", minval=1, maxval=4,        inline="dm", group=grp_post)
+sty_dm   = input.string("solid", "", options=["solid","dashed","dotted"], inline="dm", group=grp_post)
 
 // ── Midnight NY Open ──────────────────────────────────────────────────────────
 grp_mid = "Midnight NY Open"
@@ -207,7 +234,18 @@ var label lbl_e1272 = na
 var label lbl_e1618 = na
 var label lbl_e200  = na
 
-var bool session_started = false
+// Mode Post-NY : extremes du jour TradingView et lignes associees
+var float day_high      = na
+var float day_low       = na
+var line  ln_day_high   = na
+var line  ln_day_low    = na
+var line  ln_day_mid    = na
+var label lbl_day_high  = na
+var label lbl_day_low   = na
+var label lbl_day_mid   = na
+
+var bool session_started = false   // Pre-NY : Fibo dessines au moins une fois
+var bool post_ny_started = false   // Post-NY : Day lines dessinees au moins une fois
 
 var line  ln_midnight  = na
 var label lbl_midnight = na
@@ -281,7 +319,23 @@ if is_new_day
     ln_e1272 := na
     ln_e1618 := na
     ln_e200  := na
+    // Reset Day lines/labels (mode Post-NY)
+    line.delete(ln_day_high)
+    line.delete(ln_day_low)
+    line.delete(ln_day_mid)
+    label.delete(lbl_day_high)
+    label.delete(lbl_day_low)
+    label.delete(lbl_day_mid)
+    ln_day_high  := na
+    ln_day_low   := na
+    ln_day_mid   := na
+    lbl_day_high := na
+    lbl_day_low  := na
+    lbl_day_mid  := na
+    day_high     := high
+    day_low      := low
     session_started := false
+    post_ny_started := false
     day_start_bar := bar_index
 
 // ── Accumulation Pre-NY ───────────────────────────────────────────────────────
@@ -293,6 +347,11 @@ if before_ny and not is_new_day
         preny_low      := low
         preny_low_bar  := bar_index
     preny_close := close
+
+// ── Accumulation High/Low du jour TradingView (continu, toute la journee) ────
+if not is_new_day
+    day_high := math.max(nz(day_high, high), high)
+    day_low  := math.min(nz(day_low,  low),  low)
 
 // ── Snapshot a l'ouverture NY ────────────────────────────────────────────────
 if at_ny_open
@@ -359,6 +418,9 @@ p_e1272 = f_ext(1.272)
 p_e1618 = f_ext(1.618)
 p_e200  = f_ext(2.000)
 
+// Niveau median du range du jour (pour mode Post-NY)
+day_mid = (nz(day_high, high) + nz(day_low, low)) / 2
+
 // ── Tracé via line.new() ──────────────────────────────────────────────────────
 // Affichage depuis 7h Paris jusqu'a la fin de session
 paris_7h_utc = f_is_cest(time) ? 5 * 60 : 6 * 60
@@ -373,10 +435,10 @@ f_lbl(name, price, col) =>
               size      = size.small)
 
 if show_lvl
-    if not frozen or not session_started
-        // Periode dynamique (niveaux qui bougent) OU premier appel en periode figee :
-        // delete + recreate pour garantir y1 = y2 = niveau correct (ligne horizontale)
+    if not frozen
+        // ===== Mode Pre-NY : Fibo dynamiques (recreation a chaque barre) =====
         session_started := true
+        post_ny_started := false
         line.delete(ln_p0)
         line.delete(ln_p100)
         line.delete(ln_r382)
@@ -404,8 +466,8 @@ if show_lvl
         ln_e1272 := show_e1272 ? line.new(day_start_bar, p_e1272, bar_index, p_e1272, color=col_e1272, width=wid_e1272, style=f_linestyle(sty_e1272), extend=extend.none) : na
         ln_e1618 := show_e1618 ? line.new(day_start_bar, p_e1618, bar_index, p_e1618, color=col_e1618, width=wid_e1618, style=f_linestyle(sty_e1618), extend=extend.none) : na
         ln_e200  := show_e200  ? line.new(day_start_bar, p_e200,  bar_index, p_e200,  color=col_e200,  width=wid_e200,  style=f_linestyle(sty_e200),  extend=extend.none) : na
-        lbl_p0    := show_p0    ? f_lbl("0%",        p_p0,    col_p0)    : na
-        lbl_p100  := show_p100  ? f_lbl("100%",      p_p100,  col_p100)  : na
+        lbl_p0    := show_p0    ? f_lbl("0%",       p_p0,    col_p0)    : na
+        lbl_p100  := show_p100  ? f_lbl("100%",     p_p100,  col_p100)  : na
         lbl_r382  := show_r382  ? f_lbl("38.2%",    p_r382,  col_r382)  : na
         lbl_r500  := show_r500  ? f_lbl("50.0%",    p_r500,  col_r500)  : na
         lbl_r618  := show_r618  ? f_lbl("61.8%",    p_r618,  col_r618)  : na
@@ -414,55 +476,79 @@ if show_lvl
         lbl_e1618 := show_e1618 ? f_lbl("161.8%",   p_e1618, col_e1618) : na
         lbl_e200  := show_e200  ? f_lbl("200.0%",   p_e200,  col_e200)  : na
     else
-        // Periode figee, extension seulement (pattern DWM) : y ne change plus
-        if not na(ln_p0)
-            line.set_x2(ln_p0,    bar_index)
-            line.set_y2(ln_p0,    p_p0)
-        if not na(ln_p100)
-            line.set_x2(ln_p100,  bar_index)
-            line.set_y2(ln_p100,  p_p100)
-        if not na(ln_r382)
-            line.set_x2(ln_r382,  bar_index)
-            line.set_y2(ln_r382,  p_r382)
-        if not na(ln_r500)
-            line.set_x2(ln_r500,  bar_index)
-            line.set_y2(ln_r500,  p_r500)
-        if not na(ln_r618)
-            line.set_x2(ln_r618,  bar_index)
-            line.set_y2(ln_r618,  p_r618)
-        if not na(ln_r786)
-            line.set_x2(ln_r786,  bar_index)
-            line.set_y2(ln_r786,  p_r786)
-        if not na(ln_e1272)
-            line.set_x2(ln_e1272, bar_index)
-            line.set_y2(ln_e1272, p_e1272)
-        if not na(ln_e1618)
-            line.set_x2(ln_e1618, bar_index)
-            line.set_y2(ln_e1618, p_e1618)
-        if not na(ln_e200)
-            line.set_x2(ln_e200,  bar_index)
-            line.set_y2(ln_e200,  p_e200)
-        if not na(lbl_p0)
-            label.set_x(lbl_p0,    bar_index + 2)
-        if not na(lbl_p100)
-            label.set_x(lbl_p100,  bar_index + 2)
-        if not na(lbl_r382)
-            label.set_x(lbl_r382,  bar_index + 2)
-        if not na(lbl_r500)
-            label.set_x(lbl_r500,  bar_index + 2)
-        if not na(lbl_r618)
-            label.set_x(lbl_r618,  bar_index + 2)
-        if not na(lbl_r786)
-            label.set_x(lbl_r786,  bar_index + 2)
-        if not na(lbl_e1272)
-            label.set_x(lbl_e1272, bar_index + 2)
-        if not na(lbl_e1618)
-            label.set_x(lbl_e1618, bar_index + 2)
-        if not na(lbl_e200)
-            label.set_x(lbl_e200,  bar_index + 2)
+        // ===== Mode Post-NY (frozen) : Day High / Low / 50% =====
+        if not post_ny_started
+            // Transition Pre-NY -> Post-NY : on supprime tous les Fibo
+            // et on cree les Day lines pour la premiere fois
+            post_ny_started := true
+            line.delete(ln_p0)
+            line.delete(ln_p100)
+            line.delete(ln_r382)
+            line.delete(ln_r500)
+            line.delete(ln_r618)
+            line.delete(ln_r786)
+            line.delete(ln_e1272)
+            line.delete(ln_e1618)
+            line.delete(ln_e200)
+            label.delete(lbl_p0)
+            label.delete(lbl_p100)
+            label.delete(lbl_r382)
+            label.delete(lbl_r500)
+            label.delete(lbl_r618)
+            label.delete(lbl_r786)
+            label.delete(lbl_e1272)
+            label.delete(lbl_e1618)
+            label.delete(lbl_e200)
+            ln_p0    := na
+            ln_p100  := na
+            ln_r382  := na
+            ln_r500  := na
+            ln_r618  := na
+            ln_r786  := na
+            ln_e1272 := na
+            ln_e1618 := na
+            ln_e200  := na
+            lbl_p0    := na
+            lbl_p100  := na
+            lbl_r382  := na
+            lbl_r500  := na
+            lbl_r618  := na
+            lbl_r786  := na
+            lbl_e1272 := na
+            lbl_e1618 := na
+            lbl_e200  := na
+            ln_day_high  := show_dh ? line.new(day_start_bar, day_high, bar_index, day_high, color=col_dh, width=wid_dh, style=f_linestyle(sty_dh), extend=extend.none) : na
+            ln_day_low   := show_dl ? line.new(day_start_bar, day_low,  bar_index, day_low,  color=col_dl, width=wid_dl, style=f_linestyle(sty_dl), extend=extend.none) : na
+            ln_day_mid   := show_dm ? line.new(day_start_bar, day_mid,  bar_index, day_mid,  color=col_dm, width=wid_dm, style=f_linestyle(sty_dm), extend=extend.none) : na
+            lbl_day_high := show_dh ? f_lbl("Day High", day_high, col_dh) : na
+            lbl_day_low  := show_dl ? f_lbl("Day Low",  day_low,  col_dl) : na
+            lbl_day_mid  := show_dm ? f_lbl("Day 50%",  day_mid,  col_dm) : na
+        else
+            // Mise a jour continue : day_high/low peuvent encore evoluer pendant NY
+            // On met a jour y1 ET y2 pour garantir une ligne horizontale
+            if not na(ln_day_high)
+                line.set_y1(ln_day_high, day_high)
+                line.set_x2(ln_day_high, bar_index)
+                line.set_y2(ln_day_high, day_high)
+            if not na(ln_day_low)
+                line.set_y1(ln_day_low,  day_low)
+                line.set_x2(ln_day_low,  bar_index)
+                line.set_y2(ln_day_low,  day_low)
+            if not na(ln_day_mid)
+                line.set_y1(ln_day_mid,  day_mid)
+                line.set_x2(ln_day_mid,  bar_index)
+                line.set_y2(ln_day_mid,  day_mid)
+            // Labels : delete + recreate pour rafraichir le texte (valeurs changent)
+            label.delete(lbl_day_high)
+            label.delete(lbl_day_low)
+            label.delete(lbl_day_mid)
+            lbl_day_high := show_dh ? f_lbl("Day High", day_high, col_dh) : na
+            lbl_day_low  := show_dl ? f_lbl("Day Low",  day_low,  col_dl) : na
+            lbl_day_mid  := show_dm ? f_lbl("Day 50%",  day_mid,  col_dm) : na
 else
-    // Hors fenetre : supprimer les lignes et labels
+    // Hors fenetre : supprimer toutes les lignes et labels
     session_started := false
+    post_ny_started := false
     line.delete(ln_p0)
     line.delete(ln_p100)
     line.delete(ln_r382)
@@ -472,6 +558,9 @@ else
     line.delete(ln_e1272)
     line.delete(ln_e1618)
     line.delete(ln_e200)
+    line.delete(ln_day_high)
+    line.delete(ln_day_low)
+    line.delete(ln_day_mid)
     ln_p0    := na
     ln_p100  := na
     ln_r382  := na
@@ -481,6 +570,9 @@ else
     ln_e1272 := na
     ln_e1618 := na
     ln_e200  := na
+    ln_day_high := na
+    ln_day_low  := na
+    ln_day_mid  := na
     label.delete(lbl_p0)
     label.delete(lbl_p100)
     label.delete(lbl_r382)
@@ -490,6 +582,9 @@ else
     label.delete(lbl_e1272)
     label.delete(lbl_e1618)
     label.delete(lbl_e200)
+    label.delete(lbl_day_high)
+    label.delete(lbl_day_low)
+    label.delete(lbl_day_mid)
     lbl_p0    := na
     lbl_p100  := na
     lbl_r382  := na
@@ -499,11 +594,17 @@ else
     lbl_e1272 := na
     lbl_e1618 := na
     lbl_e200  := na
+    lbl_day_high := na
+    lbl_day_low  := na
+    lbl_day_mid  := na
 
-// ── Decalage label midnight - evite le recouvrement avec les labels Fibo ─────
+// ── Decalage label midnight - evite le recouvrement avec les labels visibles ─
 mid_offset = 2
 if not na(mid_open)
-    mid_close_to_fibo = (show_p0    and f_is_close(mid_open, p_p0,    0.03)) or
+    mid_close_post = (show_dh and f_is_close(mid_open, day_high, 0.03)) or
+         (show_dl and f_is_close(mid_open, day_low,  0.03)) or
+         (show_dm and f_is_close(mid_open, day_mid,  0.03))
+    mid_close_pre = (show_p0    and f_is_close(mid_open, p_p0,    0.03)) or
          (show_p100  and f_is_close(mid_open, p_p100,  0.03)) or
          (show_r382  and f_is_close(mid_open, p_r382,  0.03)) or
          (show_r500  and f_is_close(mid_open, p_r500,  0.03)) or
@@ -512,7 +613,8 @@ if not na(mid_open)
          (show_e1272 and f_is_close(mid_open, p_e1272, 0.03)) or
          (show_e1618 and f_is_close(mid_open, p_e1618, 0.03)) or
          (show_e200  and f_is_close(mid_open, p_e200,  0.03))
-    if mid_close_to_fibo
+    mid_close_to_level = frozen ? mid_close_post : mid_close_pre
+    if mid_close_to_level
         mid_offset += 14
 
 // ── Midnight NY Open ─────────────────────────────────────────────────────────

@@ -10,17 +10,23 @@ Il trace les niveaux de Fibonacci basés sur le range Pre-NY (ouverture CME Glob
 
 ## Principe
 
-Chaque nuit, le NQ trace un range entre l'ouverture de la session CME Globex (22h UTC) et l'ouverture de la session NY AM (15h30 Paris par défaut). Ce range Pre-NY constitue la base de tous les niveaux Fibonacci.
+Chaque nuit, le NQ trace un range entre l'ouverture de la session CME Globex (22h UTC) et l'ouverture de la session NY AM (15h30 Paris par défaut). Ce range Pre-NY constitue la base des niveaux Fibonacci affichés en pré-session.
 
-- **Avant 15h30 Paris** : les niveaux sont **dynamiques** — ils suivent le High/Low en temps réel
-- **A partir de 15h30** : les niveaux sont **figés** — snapshot complet du range Pre-NY
-- **Visible à partir de 7h Paris** pour préparer la session
+L'indicateur fonctionne en **deux modes** :
 
-L'ordre chronologique des extrêmes (High avant Low ou Low avant High) détermine la direction et l'orientation du Fibonacci.
+- **Mode Pre-NY (avant 15h30 Paris)** : les niveaux Fibonacci sont **dynamiques** — ils suivent le High/Low du Pre-NY en temps réel, visibles à partir de 7h Paris pour préparer la session.
+- **Mode Post-NY (à partir de 15h30)** : les niveaux Fibo disparaissent et sont remplacés par 3 lignes horizontales tracées sur la **journée TradingView complète** :
+  - Day High (orange)
+  - Day Low (orange)
+  - Day 50% (vert) — milieu du range du jour
+
+Les Day High/Low sont mis à jour en temps réel pendant la session NY si de nouveaux extrêmes sont atteints.
+
+L'ordre chronologique des extrêmes (High avant Low ou Low avant High) détermine la direction et l'orientation du Fibonacci en mode Pre-NY.
 
 ---
 
-## Niveaux tracés
+## Niveaux tracés (Mode Pre-NY)
 
 ### Retracements (contre-tendance)
 
@@ -40,6 +46,18 @@ L'ordre chronologique des extrêmes (High avant Low ou Low avant High) détermin
 | 127.2%  | Gris               | Tirets           |
 | 161.8%  | Gris               | Tirets           |
 | 200.0%  | Gris               | Pointillés       |
+
+---
+
+## Niveaux tracés (Mode Post-NY)
+
+À partir de 15h30 Paris, ces 3 lignes remplacent les Fibo et restent visibles jusqu'à la fin de la session NY PM :
+
+| Ligne     | Couleur par défaut | Description                                       |
+|-----------|--------------------|---------------------------------------------------|
+| Day High  | Orange             | Plus haut de la journée TradingView complète      |
+| Day Low   | Orange             | Plus bas de la journée TradingView complète       |
+| Day 50%   | Vert foncé         | Milieu du range du jour : (High + Low) / 2        |
 
 ---
 
@@ -95,6 +113,13 @@ Chaque niveau (0%, 100%, 38.2%, 50%, 61.8%, 78.6%) est configurable indépendamm
 
 Chaque niveau (127.2%, 161.8%, 200%) est configurable indépendamment.
 
+### Mode Post-NY
+
+Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
+
+- Afficher/masquer
+- Couleur, épaisseur, style
+
 ### Paramètres Midnight NY Open
 
 - Afficher/masquer la ligne
@@ -122,6 +147,12 @@ Chaque niveau (127.2%, 161.8%, 200%) est configurable indépendamment.
 ---
 
 ## Changelog
+
+### v1.4 - 2026-04-28
+
+- Mode Post-NY : à partir de 15h30, les niveaux Fibo disparaissent et sont remplacés par 3 lignes horizontales (Day High, Day Low, Day 50%)
+- Day High/Low calculés sur la journée TradingView complète, mis à jour en temps réel si la session NY casse les extrêmes du Pre-NY
+- Nouveau groupe d'inputs "Mode Post-NY" pour configurer ces 3 lignes
 
 ### v1.3 - 2026-04-28
 
