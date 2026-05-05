@@ -39,13 +39,23 @@ L'ordre chronologique des extrêmes (High avant Low ou Low avant High) détermin
 | 78.6%  | Violet             | OTE-                                           |
 | 100%   | Orange             | Extrémité ancienne (retracement complet)       |
 
-### Extensions (continuation de tendance)
+### Extensions sous 0% (continuation tendance Pre-NY)
 
-| Niveau  | Couleur par défaut | Style par défaut |
-|---------|--------------------|------------------|
-| 127.2%  | Gris               | Tirets           |
-| 161.8%  | Gris               | Tirets           |
-| 200.0%  | Gris               | Pointillés       |
+| Niveau | Couleur par défaut | Style par défaut | Position (DOWN)                   |
+|--------|--------------------|------------------|-----------------------------------|
+| -27.2% | Gris               | Tirets           | Low − 0.272 × range (sous le Low) |
+| -61.8% | Gris               | Tirets           | Low − 0.618 × range               |
+| -100%  | Gris               | Pointillés       | Low − 1.000 × range               |
+
+### Extensions au-dessus de 100% (cassure contre Pre-NY)
+
+| Niveau | Couleur par défaut | Style par défaut | Position (DOWN)                          |
+|--------|--------------------|------------------|------------------------------------------|
+| 127.2% | Gris               | Tirets           | High + 0.272 × range (au-dessus du High) |
+| 161.8% | Gris               | Tirets           | High + 0.618 × range                     |
+| 200.0% | Gris               | Pointillés       | High + 1.000 × range                     |
+
+L'échelle de pourcentage est mathématiquement cohérente : 0% = extrême récent, 100% = extrême ancien, valeurs négatives sous 0%, valeurs > 100% au-dessus.
 
 ---
 
@@ -111,7 +121,7 @@ Chaque niveau (0%, 100%, 38.2%, 50%, 61.8%, 78.6%) est configurable indépendamm
 
 ### Extensions
 
-Chaque niveau (127.2%, 161.8%, 200%) est configurable indépendamment.
+Chaque niveau (-27.2%, -61.8%, -100% sous 0% ; 127.2%, 161.8%, 200% au-dessus de 100%) est configurable indépendamment.
 
 ### Mode Post-NY
 
@@ -147,6 +157,11 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 ---
 
 ## Changelog
+
+### v1.5 - 2026-05-05
+
+- Renommage des extensions sous 0% : `127.2%`/`161.8%`/`200%` deviennent `-27.2%`/`-61.8%`/`-100%` (échelle de pourcentage cohérente)
+- Ajout de 3 nouvelles extensions au-dessus du 100% : `127.2%`/`161.8%`/`200%` (miroir des extensions sous 0%, marquent une cassure contre la tendance Pre-NY)
 
 ### v1.4 - 2026-04-28
 
