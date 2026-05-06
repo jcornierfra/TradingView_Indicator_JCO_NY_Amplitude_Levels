@@ -83,7 +83,9 @@ Ligne horizontale au prix d'ouverture de la barre 0h00 NY (configurable). Utile 
 
 ## Dashboard
 
-Affiché en bas à droite du graphique :
+Affiché en bas à droite du graphique. **3 modes** disponibles via la liste déroulante "Mode d'affichage" :
+
+### Mode Complet
 
 | Ligne            | Colonnes                                          | Description                                        |
 |------------------|---------------------------------------------------|----------------------------------------------------|
@@ -92,6 +94,25 @@ Affiché en bas à droite du graphique :
 | Faible P90       | 10% dép. — Ratio — Amp. NY — **Amp. Reco**        | 10% des jours dépassent cette amplitude            |
 | Modéré P75       | 25% dép. — Ratio — Amp. NY — **Amp. Reco**        | 25% des jours dépassent cette amplitude            |
 | Fort P50         | 50% dép. — Ratio — Amp. NY — **Amp. Reco**        | 50% des jours dépassent cette amplitude            |
+
+### Mode Simplifié
+
+Affichage compact en 1 colonne, sans légendes — pour utilisateurs avancés qui veulent économiser l'espace à droite du graphique :
+
+| Ligne | Contenu                  |
+|-------|--------------------------|
+| 0     | UP ▲ / DOWN ▼            |
+| 1     | Amplitude Pre-NY         |
+| 2     | « Amp. Reco » (header)   |
+| 3     | Amp. Reco Faible (vert)  |
+| 4     | Amp. Reco Modéré (jaune) |
+| 5     | Amp. Reco Fort (rouge)   |
+
+### Mode Masquer
+
+Cache complètement le dashboard.
+
+---
 
 Les ratios et l'amplitude recommandée sont calculés par jour de la semaine à partir des percentiles P90/P75/P50 issus des statistiques NQ (2 jan. 2024 – 2 avr. 2026, 581 jours).
 
@@ -108,7 +129,7 @@ Les ratios et l'amplitude recommandée sont calculés par jour de la semaine à 
 
 ### Paramètres Dashboard
 
-- **Afficher le dashboard** : afficher/masquer le dashboard
+- **Mode d'affichage** : liste déroulante — `Masquer` / `Complet` / `Simplifié`
 
 ### Retracements
 
@@ -121,7 +142,12 @@ Chaque niveau (0%, 100%, 38.2%, 50%, 61.8%, 78.6%) est configurable indépendamm
 
 ### Extensions
 
-Chaque niveau (-27.2%, -61.8%, -100% sous 0% ; 127.2%, 161.8%, 200% au-dessus de 100%) est configurable indépendamment.
+**Toggles maîtres** (en haut du groupe) :
+
+- **Afficher extensions sous 0%** : masque/affiche d'un coup les 3 lignes -27.2% / -61.8% / -100%
+- **Afficher extensions au-dessus 100%** : masque/affiche d'un coup les 3 lignes 127.2% / 161.8% / 200%
+
+Chaque niveau individuel reste configurable indépendamment (afficher, couleur, épaisseur, style).
 
 ### Mode Post-NY
 
@@ -157,6 +183,13 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 ---
 
 ## Changelog
+
+### v1.6 - 2026-05-06
+
+- Dashboard : case à cocher remplacée par liste déroulante (Masquer / Complet / Simplifié)
+- Mode simplifié : affichage compact en 1 colonne sans légendes (direction, amplitude Pre-NY, header « Amp. Reco » et 3 amplitudes recommandées)
+- Toggles maîtres pour afficher/masquer rapidement les groupes d'extensions (sous 0% et au-dessus 100%)
+- Couleurs unifiées : vert `#3fb950` pour tous les éléments verts ; jaune assombri `#c99a2c`
 
 ### v1.5 - 2026-05-05
 
