@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 1.6
+// Version: 1.7
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -21,13 +21,19 @@
 //                - Complet : direction (UP/DOWN), jour de la semaine, etat fige/dynamique,
 //                  amplitude Pre-NY, amplitude NY estimee et recommandee par niveau de risque
 //                  (Faible P90 / Modere P75 / Fort P50) base sur stats NQ 2024-2026
-//                - Simplifie : direction, amplitude Pre-NY, 3 amplitudes recommandees (1 colonne)
+//                - Simplifie : 2 colonnes compactes
+//                  Col 0 : direction, label "Amp. Pre-NY", header "Amp. Reco", 3 valeurs reco
+//                  Col 1 : etat Fige/Dynamique, valeur Pre-NY, header "Amp. NY", 3 valeurs NY
 //              - Toggles maitres pour afficher/masquer rapidement les extensions
 //                (sous 0% et au-dessus 100%)
 //              - Visible from 7h Paris until end of NY PM session
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v1.7 - 2026-05-08
+//     - Mode simplifie : passe de 1 colonne a 2 colonnes (Amp. Reco | Amp. NY)
+//     - Mode simplifie : ajout de l'etat Fige/Dynamique en haut a droite, et separation
+//       du label "Amp. Pre-NY" (col 0) et de sa valeur (col 1)
 //   v1.6 - 2026-05-06
 //     - Dashboard : case a cocher remplacee par liste deroulante (Masquer / Complet / Simplifie)
 //     - Mode simplifie : affichage compact en 1 colonne sans legendes (direction, amplitude
@@ -833,15 +839,27 @@ if barstate.islast and dash_mode != "Masquer"
         table.cell(t, 3, 5, str.tostring(math.round(amp_ny_fort)) + " pts",        text_color=color.gray,            text_size=size.small)
         table.cell(t, 4, 5, str.tostring(amp_reco_fort) + " pts",                  text_color=color.new(#ff7b72, 0), text_size=size.small)
     else
-        // ===== Mode Simplifie : 1 colonne, sans legendes =====
+        // ===== Mode Simplifie : 2 colonnes (Amp. Reco | Amp. NY), sans legendes =====
+        frz_str_s = frozen ? "Fige" : "Dynamique"
+        frz_col_s = frozen ? color.new(#3fb950, 0) : color.new(#c99a2c, 0)
+
         var table ts = table.new(
-             position.bottom_right, 1, 6,
+             position.bottom_right, 2, 6,
              bgcolor      = color.new(color.gray, 85),
              border_width = 0)
 
-        table.cell(ts, 0, 0, dir_str,                                                text_color=dir_col,               text_size=size.small)
-        table.cell(ts, 0, 1, amp_str,                                                text_color=dir_col,               text_size=size.small)
-        table.cell(ts, 0, 2, "Amp. Reco",                                            text_color=color.gray,            text_size=size.small)
-        table.cell(ts, 0, 3, str.tostring(amp_reco_faible) + " pts",                 text_color=color.new(#3fb950, 0), text_size=size.small)
-        table.cell(ts, 0, 4, str.tostring(amp_reco_modere) + " pts",                 text_color=color.new(#c99a2c, 0), text_size=size.small)
-        table.cell(ts, 0, 5, str.tostring(amp_reco_fort)   + " pts",                 text_color=color.new(#ff7b72, 0), text_size=size.small)
+        // Colonne 0 : direction, label Amp. Pre-NY, header Amp. Reco, valeurs reco
+        table.cell(ts, 0, 0, dir_str,                                       text_color=dir_col,               text_size=size.small)
+        table.cell(ts, 0, 1, "Amp. Pre-NY",                                 text_color=color.gray,            text_size=size.small)
+        table.cell(ts, 0, 2, "Amp. Reco",                                   text_color=color.gray,            text_size=size.small)
+        table.cell(ts, 0, 3, str.tostring(amp_reco_faible) + " pts",        text_color=color.new(#3fb950, 0), text_size=size.small)
+        table.cell(ts, 0, 4, str.tostring(amp_reco_modere) + " pts",        text_color=color.new(#c99a2c, 0), text_size=size.small)
+        table.cell(ts, 0, 5, str.tostring(amp_reco_fort)   + " pts",        text_color=color.new(#ff7b72, 0), text_size=size.small)
+
+        // Colonne 1 : etat Fige/Dynamique, valeur Pre-NY, header Amp. NY et valeurs NY estimees
+        table.cell(ts, 1, 0, frz_str_s,                                     text_color=frz_col_s,             text_size=size.small)
+        table.cell(ts, 1, 1, amp_str,                                       text_color=dir_col,               text_size=size.small)
+        table.cell(ts, 1, 2, "Amp. NY",                                     text_color=color.gray,            text_size=size.small)
+        table.cell(ts, 1, 3, str.tostring(math.round(amp_ny_faible)) + " pts", text_color=color.new(#3fb950, 0), text_size=size.small)
+        table.cell(ts, 1, 4, str.tostring(math.round(amp_ny_modere)) + " pts", text_color=color.new(#c99a2c, 0), text_size=size.small)
+        table.cell(ts, 1, 5, str.tostring(math.round(amp_ny_fort))   + " pts", text_color=color.new(#ff7b72, 0), text_size=size.small)

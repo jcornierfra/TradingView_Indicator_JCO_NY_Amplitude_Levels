@@ -97,16 +97,16 @@ Affiché en bas à droite du graphique. **3 modes** disponibles via la liste dé
 
 ### Mode Simplifié
 
-Affichage compact en 1 colonne, sans légendes — pour utilisateurs avancés qui veulent économiser l'espace à droite du graphique :
+Affichage compact en 2 colonnes, sans légendes — pour utilisateurs avancés qui veulent économiser l'espace à droite du graphique :
 
-| Ligne | Contenu                  |
-|-------|--------------------------|
-| 0     | UP ▲ / DOWN ▼            |
-| 1     | Amplitude Pre-NY         |
-| 2     | « Amp. Reco » (header)   |
-| 3     | Amp. Reco Faible (vert)  |
-| 4     | Amp. Reco Modéré (jaune) |
-| 5     | Amp. Reco Fort (rouge)   |
+| Ligne | Colonne 0                | Colonne 1                   |
+|-------|--------------------------|-----------------------------|
+| 0     | UP ▲ / DOWN ▼            | Figé / Dynamique            |
+| 1     | « Amp. Pre-NY » (label)  | Valeur Pre-NY (ex. 121 pts) |
+| 2     | « Amp. Reco » (header)   | « Amp. NY » (header)        |
+| 3     | Amp. Reco Faible (vert)  | Amp. NY Faible (vert)       |
+| 4     | Amp. Reco Modéré (jaune) | Amp. NY Modéré (jaune)      |
+| 5     | Amp. Reco Fort (rouge)   | Amp. NY Fort (rouge)        |
 
 ### Mode Masquer
 
@@ -183,6 +183,11 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 ---
 
 ## Changelog
+
+### v1.7 - 2026-05-08
+
+- Mode simplifié : passe de 1 colonne à 2 colonnes (Amp. Reco à gauche, Amp. NY à droite)
+- Mode simplifié : ajout de l'état Figé/Dynamique en haut à droite, et séparation du label « Amp. Pre-NY » (col 0) et de sa valeur (col 1)
 
 ### v1.6 - 2026-05-06
 
