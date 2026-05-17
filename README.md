@@ -81,6 +81,52 @@ Ligne horizontale au prix d'ouverture de la barre 0h00 NY (configurable). Utile 
 
 ---
 
+## Marques d'amplitude (greffon)
+
+Greffon intégré (port de l'indicateur **JCO Amplitude v2.2.0**) qui pose automatiquement des marques sur le graphique quand le prix parcourt une amplitude définie. Utile pour identifier visuellement des points contrariens (sortie d'un mouvement) ou des continuations.
+
+![Logique amp1/amp2 continuation](Amplitude_1_2_continuation.png)
+
+### Principe
+
+Mécanique à deux phases :
+
+**Phase 1 — Searching (1ère marque du jour)**
+Détection du dernier swing valide (selon `Swing left bars` / `Swing right bars`). Depuis le swing, on attend que `amp1` soit atteint dans le sens opposé. Une marque est posée au prix exact `swing ± amp1` → passage en phase 2.
+
+**Phase 2 — Tracking (cycle après la 1ère marque)**
+Deux règles évaluées par priorité :
+
+1. **Reversal** (seuil = `amp1`, toujours) : si le prix retrace d'au moins `amp1` depuis l'extrême atteint, marque posée de couleur opposée, direction inversée.
+2. **Continuation** (path-driven, `amp1` ou `amp2` selon le contexte) : si le prix repart dans le sens de la tendance, marque posée à l'extrême opposé + `amp_path`.
+
+Le path (amp1 vs amp2) est ré-évalué uniquement quand l'extrême opposé fait un nouveau plus bas (ou plus haut). Si le retracement dépasse 30% du mouvement total depuis l'origine → `amp1` (pleine amplitude), sinon `amp2` (continuation réduite).
+
+### Code couleur (lecture contrarienne)
+
+| Mouvement | Couleur | Signal |
+|-----------|---------|--------|
+| Bas → Haut | Rouge | Signal vente |
+| Haut → Bas | Vert | Signal achat |
+
+### Spécificités techniques
+
+- **Force la timeframe M1** quelle que soit la TF du chart, via `request.security_lower_tf()`. Permet d'utiliser un chart M5, M15, H1 pour le contexte tout en gardant la finesse de déclenchement M1.
+- **Fenêtre d'affichage** configurable (défaut : 8h–22h Paris).
+- **Reset journalier** à minuit Paris.
+- Toggle `Afficher les marques` pour activer/désactiver le greffon (case à cocher en tête du groupe).
+
+### Paramètres principaux
+
+- **Amp1** (défaut : 80 pts) — amplitude pour la 1ère marque et les reversals
+- **Amp2** (défaut : 60 pts) — amplitude pour les continuations
+- **Prix par point** (défaut : 1.0 pour NQ/MNQ/ES)
+- **Swing left/right bars** (défaut : 1/1) — sensibilité de la détection swing
+- **Fenêtre horaire** (défaut : 8h–22h Paris)
+- **Largeur marque, épaisseur trait, couleurs bull/bear** — personnalisation visuelle
+
+---
+
 ## Dashboard
 
 Affiché en bas à droite du graphique. **3 modes** disponibles via la liste déroulante "Mode d'affichage" :
@@ -131,6 +177,10 @@ Les ratios et l'amplitude recommandée sont calculés par jour de la semaine à 
 
 - **Mode d'affichage** : liste déroulante — `Masquer` / `Complet` / `Simplifié`
 
+### Niveaux (toggle maître)
+
+- **Afficher toutes les lignes** : case à cocher unique qui masque/affiche d'un coup **toutes** les lignes des niveaux (les 6 retracements, les 6 extensions, et les 3 Day lines Post-NY). La ligne Midnight NY garde son toggle indépendant.
+
 ### Retracements
 
 Chaque niveau (0%, 100%, 38.2%, 50%, 61.8%, 78.6%) est configurable indépendamment :
@@ -163,6 +213,15 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 - Timezone (New York, Chicago, Los Angeles, London, Paris, Berlin, Tokyo, Hong Kong, Sydney, UTC)
 - Heure (0–23) et Minute (0–59)
 
+### Marques d'amplitude (greffon)
+
+- **Afficher les marques** : toggle global du greffon
+- **Amp1** / **Amp2** : amplitudes en points (défaut 80 / 60)
+- **Prix par point** : 1.0 pour NQ/MNQ/ES
+- **Swing left/right bars** : sensibilité de détection (défaut 1/1)
+- **Fenêtre horaire Paris** : début/fin (défaut 8h–22h)
+- **Largeur marque, épaisseur trait, couleurs bull/bear**
+
 ---
 
 ## Installation
@@ -183,6 +242,11 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 ---
 
 ## Changelog
+
+### v1.8 - 2026-05-17
+
+- Ajout du greffon **Marques d'amplitude** (port de l'indicateur JCO Amplitude v2.2.0) : détection swing M1 + machine d'états deux phases qui pose des marques aux points d'amplitude `amp1` (reversal) et `amp2` (continuation). Force la timeframe M1 via `request.security_lower_tf()` quelle que soit la TF du chart.
+- Nouveau toggle maître **Afficher toutes les lignes** pour masquer d'un coup toutes les lignes des niveaux (Fibo + Day lines). La ligne Midnight NY garde son toggle indépendant.
 
 ### v1.7 - 2026-05-08
 

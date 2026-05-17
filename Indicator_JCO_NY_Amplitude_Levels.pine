@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 1.7
+// Version: 1.8
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -26,10 +26,24 @@
 //                  Col 1 : etat Fige/Dynamique, valeur Pre-NY, header "Amp. NY", 3 valeurs NY
 //              - Toggles maitres pour afficher/masquer rapidement les extensions
 //                (sous 0% et au-dessus 100%)
+//              - Toggle maitre "Afficher toutes les lignes" pour cacher d'un coup
+//                toutes les lignes Fibo et Day (la ligne Midnight garde son toggle propre)
+//              - Greffon "Marques d'amplitude" : detection swing M1 + machine d'etats
+//                deux phases qui pose des marques aux points d'amplitude amp1/amp2
+//                (port de l'indicateur JCO Amplitude v2.2.0)
 //              - Visible from 7h Paris until end of NY PM session
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v1.8 - 2026-05-17
+//     - Ajout du greffon "Marques d'amplitude" : port de l'indicateur JCO Amplitude v2.2.0.
+//       Detection swing M1 + machine d'etats deux phases (searching/tracking) qui pose
+//       des marques aux points d'amplitude amp1 (reversal) et amp2 (continuation),
+//       avec re-evaluation du path (amp1 vs amp2) selon le pourcentage de retracement
+//       depuis l'origine. Force la TF M1 via request.security_lower_tf().
+//     - Nouveau toggle maitre "Afficher toutes les lignes" pour masquer d'un coup
+//       toutes les lignes des niveaux (Fibo et Day lines). La ligne Midnight NY
+//       garde son toggle independant.
 //   v1.7 - 2026-05-08
 //     - Mode simplifie : passe de 1 colonne a 2 colonnes (Amp. Reco | Amp. NY)
 //     - Mode simplifie : ajout de l'etat Fige/Dynamique en haut a droite, et separation
@@ -75,35 +89,39 @@ ny_min   = input.int(30, "Minute debut NY AM",         minval=0, maxval=59, grou
 grp_dash  = "Dashboard"
 dash_mode = input.string("Complet", "Mode d'affichage", options=["Masquer", "Complet", "Simplifie"], group=grp_dash)
 
+// ── Niveaux (toggle maitre pour toutes les lignes Fibo et Day) ───────────────
+grp_lvl     = "Niveaux (Fibo et Day lines)"
+show_levels = input.bool(true, "Afficher toutes les lignes", group=grp_lvl)
+
 // ── Retracements ──────────────────────────────────────────────────────────────
 grp_ret   = "Retracements (contre-tendance Pre-NY)"
 
-show_p0   = input.bool(true,  "0%",         inline="p0", group=grp_ret)
+show_p0   = input.bool(true,  "0%",         inline="p0", group=grp_ret) and show_levels
 col_p0    = input.color(color.new(color.orange,0),"", inline="p0", group=grp_ret)
 wid_p0    = input.int(1,"",minval=1,maxval=4,         inline="p0", group=grp_ret)
 sty_p0    = input.string("solid","",options=["solid","dashed","dotted"], inline="p0", group=grp_ret)
 
-show_p100 = input.bool(true,  "100%",       inline="p1", group=grp_ret)
+show_p100 = input.bool(true,  "100%",       inline="p1", group=grp_ret) and show_levels
 col_p100  = input.color(color.new(color.orange,0),"", inline="p1", group=grp_ret)
 wid_p100  = input.int(1,"",minval=1,maxval=4,         inline="p1", group=grp_ret)
 sty_p100  = input.string("solid","",options=["solid","dashed","dotted"], inline="p1", group=grp_ret)
 
-show_r382 = input.bool(true,  "38.2%",      inline="r1", group=grp_ret)
+show_r382 = input.bool(true,  "38.2%",      inline="r1", group=grp_ret) and show_levels
 col_r382  = input.color(color.new(color.red,     0),"", inline="r1", group=grp_ret)
 wid_r382  = input.int(1,"",minval=1,maxval=4,           inline="r1", group=grp_ret)
 sty_r382  = input.string("solid","",options=["solid","dashed","dotted"], inline="r1", group=grp_ret)
 
-show_r500 = input.bool(true,  "50.0%",      inline="r2", group=grp_ret)
+show_r500 = input.bool(true,  "50.0%",      inline="r2", group=grp_ret) and show_levels
 col_r500  = input.color(color.new(#3fb950,   0),"",    inline="r2", group=grp_ret)
 wid_r500  = input.int(1,"",minval=1,maxval=4,           inline="r2", group=grp_ret)
 sty_r500  = input.string("solid","",options=["solid","dashed","dotted"], inline="r2", group=grp_ret)
 
-show_r618 = input.bool(true,  "61.8% OTE+", inline="r3", group=grp_ret)
+show_r618 = input.bool(true,  "61.8% OTE+", inline="r3", group=grp_ret) and show_levels
 col_r618  = input.color(color.new(color.blue,  0),"",  inline="r3", group=grp_ret)
 wid_r618  = input.int(1,"",minval=1,maxval=4,           inline="r3", group=grp_ret)
 sty_r618  = input.string("solid","",options=["solid","dashed","dotted"], inline="r3", group=grp_ret)
 
-show_r786 = input.bool(true,  "78.6% OTE-", inline="r4", group=grp_ret)
+show_r786 = input.bool(true,  "78.6% OTE-", inline="r4", group=grp_ret) and show_levels
 col_r786  = input.color(color.new(color.purple,0),"",  inline="r4", group=grp_ret)
 wid_r786  = input.int(1,"",minval=1,maxval=4,          inline="r4", group=grp_ret)
 sty_r786  = input.string("solid","",options=["solid","dashed","dotted"], inline="r4", group=grp_ret)
@@ -116,33 +134,33 @@ show_ext_neg = input.bool(true, "Afficher extensions sous 0%",        group=grp_
 show_ext_pos = input.bool(true, "Afficher extensions au-dessus 100%", group=grp_ext)
 
 // Extensions sous 0% (continuation tendance Pre-NY)
-show_e1272 = input.bool(true,  "-27.2%", inline="e1", group=grp_ext) and show_ext_neg
+show_e1272 = input.bool(true,  "-27.2%", inline="e1", group=grp_ext) and show_ext_neg and show_levels
 col_e1272  = input.color(color.new(color.gray,  0),"", inline="e1", group=grp_ext)
 wid_e1272  = input.int(1,"",minval=1,maxval=4,         inline="e1", group=grp_ext)
 sty_e1272  = input.string("dashed","",options=["solid","dashed","dotted"], inline="e1", group=grp_ext)
 
-show_e1618 = input.bool(true,  "-61.8%", inline="e2", group=grp_ext) and show_ext_neg
+show_e1618 = input.bool(true,  "-61.8%", inline="e2", group=grp_ext) and show_ext_neg and show_levels
 col_e1618  = input.color(color.new(color.gray,  0),"", inline="e2", group=grp_ext)
 wid_e1618  = input.int(1,"",minval=1,maxval=4,         inline="e2", group=grp_ext)
 sty_e1618  = input.string("dashed","",options=["solid","dashed","dotted"], inline="e2", group=grp_ext)
 
-show_e200  = input.bool(true,  "-100%",  inline="e3", group=grp_ext) and show_ext_neg
+show_e200  = input.bool(true,  "-100%",  inline="e3", group=grp_ext) and show_ext_neg and show_levels
 col_e200   = input.color(color.new(color.gray,  0),"", inline="e3", group=grp_ext)
 wid_e200   = input.int(1,"",minval=1,maxval=4,         inline="e3", group=grp_ext)
 sty_e200   = input.string("dotted","",options=["solid","dashed","dotted"], inline="e3", group=grp_ext)
 
 // Extensions au-dessus de 100% (cassure contre Pre-NY)
-show_pos1272 = input.bool(true,  "127.2%", inline="ep1", group=grp_ext) and show_ext_pos
+show_pos1272 = input.bool(true,  "127.2%", inline="ep1", group=grp_ext) and show_ext_pos and show_levels
 col_pos1272  = input.color(color.new(color.gray,  0),"", inline="ep1", group=grp_ext)
 wid_pos1272  = input.int(1,"",minval=1,maxval=4,         inline="ep1", group=grp_ext)
 sty_pos1272  = input.string("dashed","",options=["solid","dashed","dotted"], inline="ep1", group=grp_ext)
 
-show_pos1618 = input.bool(true,  "161.8%", inline="ep2", group=grp_ext) and show_ext_pos
+show_pos1618 = input.bool(true,  "161.8%", inline="ep2", group=grp_ext) and show_ext_pos and show_levels
 col_pos1618  = input.color(color.new(color.gray,  0),"", inline="ep2", group=grp_ext)
 wid_pos1618  = input.int(1,"",minval=1,maxval=4,         inline="ep2", group=grp_ext)
 sty_pos1618  = input.string("dashed","",options=["solid","dashed","dotted"], inline="ep2", group=grp_ext)
 
-show_pos200  = input.bool(true,  "200.0%", inline="ep3", group=grp_ext) and show_ext_pos
+show_pos200  = input.bool(true,  "200.0%", inline="ep3", group=grp_ext) and show_ext_pos and show_levels
 col_pos200   = input.color(color.new(color.gray,  0),"", inline="ep3", group=grp_ext)
 wid_pos200   = input.int(1,"",minval=1,maxval=4,         inline="ep3", group=grp_ext)
 sty_pos200   = input.string("dotted","",options=["solid","dashed","dotted"], inline="ep3", group=grp_ext)
@@ -150,17 +168,17 @@ sty_pos200   = input.string("dotted","",options=["solid","dashed","dotted"], inl
 // ── Mode Post-NY (apres 15h30 : remplace les Fibo) ───────────────────────────
 grp_post = "Mode Post-NY (apres 15h30)"
 
-show_dh  = input.bool(true,  "Day High",   inline="dh", group=grp_post)
+show_dh  = input.bool(true,  "Day High",   inline="dh", group=grp_post) and show_levels
 col_dh   = input.color(color.new(color.orange, 0), "", inline="dh", group=grp_post)
 wid_dh   = input.int(1, "", minval=1, maxval=4,        inline="dh", group=grp_post)
 sty_dh   = input.string("solid", "", options=["solid","dashed","dotted"], inline="dh", group=grp_post)
 
-show_dl  = input.bool(true,  "Day Low",    inline="dl", group=grp_post)
+show_dl  = input.bool(true,  "Day Low",    inline="dl", group=grp_post) and show_levels
 col_dl   = input.color(color.new(color.orange, 0), "", inline="dl", group=grp_post)
 wid_dl   = input.int(1, "", minval=1, maxval=4,        inline="dl", group=grp_post)
 sty_dl   = input.string("solid", "", options=["solid","dashed","dotted"], inline="dl", group=grp_post)
 
-show_dm  = input.bool(true,  "Day 50%",    inline="dm", group=grp_post)
+show_dm  = input.bool(true,  "Day 50%",    inline="dm", group=grp_post) and show_levels
 col_dm   = input.color(color.new(#3fb950, 0), "",      inline="dm", group=grp_post)
 wid_dm   = input.int(1, "", minval=1, maxval=4,        inline="dm", group=grp_post)
 sty_dm   = input.string("solid", "", options=["solid","dashed","dotted"], inline="dm", group=grp_post)
@@ -176,6 +194,23 @@ mid_tz      = input.string("New York", "Timezone",
               group=grp_mid)
 mid_hour    = input.int(0, "Heure (0-23)",   minval=0, maxval=23, group=grp_mid)
 mid_minute  = input.int(0, "Minute (0-59)",  minval=0, maxval=59, group=grp_mid)
+
+// ── Greffon : Marques d'amplitude (port de JCO Amplitude v2.2.0) ─────────────
+grp_marks       = "Marques d'amplitude (greffon)"
+show_marks      = input.bool(true, "Afficher les marques",                      group=grp_marks)
+amp1Pts         = input.float(80,  "Amp1 (1ere / reversal)",        minval=1,   group=grp_marks)
+amp2Pts         = input.float(60,  "Amp2 (continuation)",           minval=1,   group=grp_marks)
+amp_pointSize   = input.float(1.0, "Prix par point (NQ/MNQ/ES = 1)", minval=0.01, step=0.05, group=grp_marks)
+amp_leftBars    = input.int(1,     "Swing left bars",               minval=1, maxval=20, group=grp_marks)
+amp_rightBars   = input.int(1,     "Swing right bars",              minval=1, maxval=20, group=grp_marks)
+amp_startHour   = input.int(8,     "Debut (Paris) h",               minval=0, maxval=23, group=grp_marks, inline="m_start")
+amp_startMinute = input.int(0,     "min",                           minval=0, maxval=59, group=grp_marks, inline="m_start")
+amp_endHour     = input.int(22,    "Fin   (Paris) h",               minval=0, maxval=24, group=grp_marks, inline="m_end")
+amp_endMinute   = input.int(0,     "min",                           minval=0, maxval=59, group=grp_marks, inline="m_end")
+markerWidthBars = input.float(1.4, "Largeur marque (bars)",         minval=0.5, step=0.1, group=grp_marks)
+amp_lineWidth   = input.int(2,     "Epaisseur trait",               minval=1, maxval=10, group=grp_marks)
+amp_bullColor   = input.color(color.new(#00C853, 10), "Couleur haussiere (signal achat)", group=grp_marks)
+amp_bearColor   = input.color(color.new(#FF1744, 10), "Couleur baissiere (signal vente)", group=grp_marks)
 
 // ── Detection heure d'ete Paris (CEST = GMT+2) ────────────────────────────────
 // Dernier dimanche de mars -> dernier dimanche d'octobre
@@ -863,3 +898,247 @@ if barstate.islast and dash_mode != "Masquer"
         table.cell(ts, 1, 3, str.tostring(math.round(amp_ny_faible)) + " pts", text_color=color.new(#3fb950, 0), text_size=size.small)
         table.cell(ts, 1, 4, str.tostring(math.round(amp_ny_modere)) + " pts", text_color=color.new(#c99a2c, 0), text_size=size.small)
         table.cell(ts, 1, 5, str.tostring(math.round(amp_ny_fort))   + " pts", text_color=color.new(#ff7b72, 0), text_size=size.small)
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GREFFON : Marques d'amplitude (port de JCO Amplitude v2.2.0)
+// Detection swing M1 + machine d'etats deux phases (searching/tracking)
+// Force la TF M1 via request.security_lower_tf() quelle que soit la TF du chart
+// ═══════════════════════════════════════════════════════════════════════════
+
+// === Type Etat ===
+type AmpState
+    string phase           // "searching" | "tracking"
+    string direction       // "up" (marque rouge) | "down" (marque verte)
+    float  activeAmpPts
+    float  origin
+    float  refExtreme
+    float  oppExtreme
+    float  localOpp
+    float  recoveryExt
+    bool   retracementSeen
+    string currentPath     // "amp1" | "amp2"
+    float  swingPrice
+    int    swingTime
+    string swingType       // "low" | "high"
+    int    lastDayKey
+
+var AmpState amp_s = AmpState.new(
+     phase           = "searching",
+     direction       = na,
+     activeAmpPts    = na,
+     origin          = na,
+     refExtreme      = na,
+     oppExtreme      = na,
+     localOpp        = na,
+     recoveryExt     = na,
+     retracementSeen = false,
+     currentPath     = "amp2",
+     swingPrice      = na,
+     swingTime       = na,
+     swingType       = na,
+     lastDayKey      = 0)
+
+// === Historique des bougies M1 (buffer local pour la detection swing) ===
+var array<float> amp_hist_h = array.new<float>()
+var array<float> amp_hist_l = array.new<float>()
+var array<int>   amp_hist_t = array.new<int>()
+const int AMP_MAX_HIST = 200
+
+// === Helper de dessin (trait horizontal au prix de declenchement) ===
+f_drawAmpMarker(triggerPrice, useBearColor, t) =>
+    tfSec = timeframe.in_seconds(timeframe.period)
+    tfMs  = (tfSec > 0 ? tfSec : 60) * 1000
+    halfW = int(math.round(tfMs * markerWidthBars / 2.0))
+    col   = useBearColor ? amp_bearColor : amp_bullColor
+    line.new(x1=t - halfW, y1=triggerPrice, x2=t + halfW, y2=triggerPrice,
+             xloc=xloc.bar_time, color=col, width=amp_lineWidth)
+
+// === Traitement d'une bougie M1 ===
+f_processAmpBar(float h, float l, int t) =>
+    // 1) Push history + trim
+    array.push(amp_hist_h, h)
+    array.push(amp_hist_l, l)
+    array.push(amp_hist_t, t)
+    if array.size(amp_hist_h) > AMP_MAX_HIST
+        array.shift(amp_hist_h)
+        array.shift(amp_hist_l)
+        array.shift(amp_hist_t)
+
+    // 2) Reset journalier (minuit Europe/Paris)
+    int dk = year(t, "Europe/Paris") * 10000 + month(t, "Europe/Paris") * 100 + dayofmonth(t, "Europe/Paris")
+    if amp_s.lastDayKey != 0 and dk != amp_s.lastDayKey
+        amp_s.phase           := "searching"
+        amp_s.direction       := na
+        amp_s.activeAmpPts    := na
+        amp_s.origin          := na
+        amp_s.refExtreme      := na
+        amp_s.oppExtreme      := na
+        amp_s.localOpp        := na
+        amp_s.recoveryExt     := na
+        amp_s.retracementSeen := false
+        amp_s.currentPath     := "amp2"
+        amp_s.swingPrice      := na
+        amp_s.swingTime       := na
+        amp_s.swingType       := na
+    amp_s.lastDayKey := dk
+
+    // 3) Detection swing (phase searching uniquement)
+    if amp_s.phase == "searching"
+        int n = array.size(amp_hist_h)
+        if n >= amp_leftBars + amp_rightBars + 1
+            int pivotIdx = n - 1 - amp_rightBars
+            float pivotHigh = array.get(amp_hist_h, pivotIdx)
+            float pivotLow  = array.get(amp_hist_l, pivotIdx)
+            bool isSwingLow  = true
+            bool isSwingHigh = true
+            for k = 1 to amp_leftBars
+                if array.get(amp_hist_l, pivotIdx - k) <= pivotLow
+                    isSwingLow := false
+                if array.get(amp_hist_h, pivotIdx - k) >= pivotHigh
+                    isSwingHigh := false
+            for k = 1 to amp_rightBars
+                if array.get(amp_hist_l, pivotIdx + k) <= pivotLow
+                    isSwingLow := false
+                if array.get(amp_hist_h, pivotIdx + k) >= pivotHigh
+                    isSwingHigh := false
+            int pivotTime = array.get(amp_hist_t, pivotIdx)
+            if isSwingLow
+                if na(amp_s.swingTime) or amp_s.swingTime != pivotTime or amp_s.swingType != "low"
+                    amp_s.swingPrice := pivotLow
+                    amp_s.swingTime  := pivotTime
+                    amp_s.swingType  := "low"
+            else if isSwingHigh
+                if na(amp_s.swingTime) or amp_s.swingTime != pivotTime or amp_s.swingType != "high"
+                    amp_s.swingPrice := pivotHigh
+                    amp_s.swingTime  := pivotTime
+                    amp_s.swingType  := "high"
+
+    // 4) Fenetre horaire
+    int minutesNow = hour(t, "Europe/Paris") * 60 + minute(t, "Europe/Paris")
+    int startMins  = amp_startHour * 60 + amp_startMinute
+    int endMins    = amp_endHour   * 60 + amp_endMinute
+    bool inWindow  = minutesNow >= startMins and minutesNow < endMins
+
+    if inWindow
+        float amp1Price = amp1Pts * amp_pointSize
+        float amp2Price = amp2Pts * amp_pointSize
+
+        // -------- Phase 1 : searching --------
+        if amp_s.phase == "searching" and not na(amp_s.swingPrice)
+            if amp_s.swingType == "low"
+                float triggerPrice = amp_s.swingPrice + amp1Price
+                if h >= triggerPrice
+                    f_drawAmpMarker(triggerPrice, true, t)
+                    amp_s.phase           := "tracking"
+                    amp_s.direction       := "up"
+                    amp_s.origin          := amp_s.swingPrice
+                    amp_s.activeAmpPts    := amp1Pts
+                    amp_s.refExtreme      := triggerPrice
+                    amp_s.oppExtreme      := triggerPrice
+                    amp_s.localOpp        := triggerPrice
+                    amp_s.recoveryExt     := triggerPrice
+                    amp_s.retracementSeen := false
+                    amp_s.currentPath     := "amp2"
+            else if amp_s.swingType == "high"
+                float triggerPrice = amp_s.swingPrice - amp1Price
+                if l <= triggerPrice
+                    f_drawAmpMarker(triggerPrice, false, t)
+                    amp_s.phase           := "tracking"
+                    amp_s.direction       := "down"
+                    amp_s.origin          := amp_s.swingPrice
+                    amp_s.activeAmpPts    := amp1Pts
+                    amp_s.refExtreme      := triggerPrice
+                    amp_s.oppExtreme      := triggerPrice
+                    amp_s.localOpp        := triggerPrice
+                    amp_s.recoveryExt     := triggerPrice
+                    amp_s.retracementSeen := false
+                    amp_s.currentPath     := "amp2"
+        // -------- Phase 2 : tracking --------
+        else if amp_s.phase == "tracking"
+            // 1) Mise a jour des extremes
+            bool oppDropped = false
+            if amp_s.direction == "up"
+                if h > amp_s.refExtreme
+                    amp_s.refExtreme := h
+                    amp_s.localOpp   := amp_s.refExtreme
+                if l < amp_s.localOpp
+                    amp_s.localOpp := l
+                if l < amp_s.oppExtreme
+                    amp_s.oppExtreme      := l
+                    amp_s.recoveryExt     := l
+                    amp_s.retracementSeen := true
+                    oppDropped            := true
+                if h > amp_s.recoveryExt
+                    amp_s.recoveryExt := h
+            else
+                if l < amp_s.refExtreme
+                    amp_s.refExtreme := l
+                    amp_s.localOpp   := amp_s.refExtreme
+                if h > amp_s.localOpp
+                    amp_s.localOpp := h
+                if h > amp_s.oppExtreme
+                    amp_s.oppExtreme      := h
+                    amp_s.recoveryExt     := h
+                    amp_s.retracementSeen := true
+                    oppDropped            := true
+                if l < amp_s.recoveryExt
+                    amp_s.recoveryExt := l
+
+            // 2) Distances signees
+            float retrace      = amp_s.direction == "up" ? amp_s.refExtreme  - amp_s.oppExtreme  : amp_s.oppExtreme - amp_s.refExtreme
+            float localRetrace = amp_s.direction == "up" ? amp_s.refExtreme  - amp_s.localOpp    : amp_s.localOpp   - amp_s.refExtreme
+            float recovery     = amp_s.direction == "up" ? amp_s.recoveryExt - amp_s.oppExtreme  : amp_s.oppExtreme - amp_s.recoveryExt
+            float totalMove    = amp_s.direction == "up" ? amp_s.refExtreme  - amp_s.origin      : amp_s.origin     - amp_s.refExtreme
+
+            // 3) Re-evaluation du path uniquement sur baisse d'oppExtreme
+            if oppDropped
+                amp_s.currentPath := retrace > 0.30 * totalMove ? "amp1" : "amp2"
+
+            // 4) Regles par priorite
+            bool markPlaced = false
+
+            // Regle 1 : Reversal (seuil = amp1 TOUJOURS, requiert un vrai retracement)
+            if amp_s.retracementSeen and localRetrace >= amp1Price
+                float revTrigger = amp_s.direction == "up" ? amp_s.refExtreme - amp1Price : amp_s.refExtreme + amp1Price
+                string newDirection = amp_s.direction == "up" ? "down" : "up"
+                bool useBearColor = newDirection == "up"
+                f_drawAmpMarker(revTrigger, useBearColor, t)
+                amp_s.direction       := newDirection
+                amp_s.origin          := amp_s.refExtreme
+                amp_s.activeAmpPts    := amp1Pts
+                amp_s.refExtreme      := revTrigger
+                amp_s.oppExtreme      := revTrigger
+                amp_s.localOpp        := revTrigger
+                amp_s.recoveryExt     := revTrigger
+                amp_s.retracementSeen := false
+                amp_s.currentPath     := "amp2"
+                markPlaced            := true
+
+            // Regle 2 : Continuation (path-driven : amp1 ou amp2 selon currentPath)
+            if not markPlaced
+                float ampPathPrice = amp_s.currentPath == "amp1" ? amp1Price : amp2Price
+                float ampPathPts   = amp_s.currentPath == "amp1" ? amp1Pts   : amp2Pts
+                if recovery >= ampPathPrice
+                    float contTrigger = amp_s.direction == "up" ? amp_s.oppExtreme + ampPathPrice : amp_s.oppExtreme - ampPathPrice
+                    bool useBearColor = amp_s.direction == "up"
+                    f_drawAmpMarker(contTrigger, useBearColor, t)
+                    amp_s.origin          := amp_s.oppExtreme
+                    amp_s.activeAmpPts    := ampPathPts
+                    amp_s.refExtreme      := contTrigger
+                    amp_s.oppExtreme      := contTrigger
+                    amp_s.localOpp        := contTrigger
+                    amp_s.recoveryExt     := contTrigger
+                    amp_s.retracementSeen := false
+                    amp_s.currentPath     := "amp2"
+
+// === Entry point greffon ===
+// Force M1 quelle que soit la TF du chart. Si chart < M1, retombe sur la TF du chart.
+string amp_forcedTf = timeframe.in_seconds(timeframe.period) >= 60 ? "1" : timeframe.period
+[amp_m1_h, amp_m1_l, amp_m1_t] = request.security_lower_tf(syminfo.tickerid, amp_forcedTf, [high, low, time])
+
+if show_marks and not na(amp_m1_h)
+    int amp_n = array.size(amp_m1_h)
+    if amp_n > 0
+        for i = 0 to amp_n - 1
+            f_processAmpBar(array.get(amp_m1_h, i), array.get(amp_m1_l, i), array.get(amp_m1_t, i))
