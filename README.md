@@ -104,10 +104,10 @@ Le path (amp1 vs amp2) est ré-évalué uniquement quand l'extrême opposé fait
 
 ### Code couleur (lecture contrarienne)
 
-| Mouvement | Couleur | Signal |
-|-----------|---------|--------|
-| Bas → Haut | Rouge | Signal vente |
-| Haut → Bas | Vert | Signal achat |
+| Mouvement  | Couleur | Signal       |
+|------------|---------|--------------|
+| Bas → Haut | Rouge   | Signal vente |
+| Haut → Bas | Vert    | Signal achat |
 
 ### Spécificités techniques
 
@@ -133,26 +133,26 @@ Affiché en bas à droite du graphique. **3 modes** disponibles via la liste dé
 
 ### Mode Complet
 
-| Ligne            | Colonnes                                          | Description                                        |
-|------------------|---------------------------------------------------|----------------------------------------------------|
-| Direction Pre-NY | UP / DOWN — Jour — Dynamique/Figé                 | Direction, jour de la semaine, état                |
-| Amplitude Pre-NY | ex. 121 pts                                       | Range total High–Low                               |
-| Faible P90       | 10% dép. — Ratio — Amp. NY — **Amp. Reco**        | 10% des jours dépassent cette amplitude            |
-| Modéré P75       | 25% dép. — Ratio — Amp. NY — **Amp. Reco**        | 25% des jours dépassent cette amplitude            |
-| Fort P50         | 50% dép. — Ratio — Amp. NY — **Amp. Reco**        | 50% des jours dépassent cette amplitude            |
+| Ligne            | Colonnes                                        | Description                                                    |
+|------------------|-------------------------------------------------|----------------------------------------------------------------|
+| Direction Pre-NY | UP / DOWN — Jour — Dynamique/Figé               | Direction, jour de la semaine, état                            |
+| Amplitude Pre-NY | ex. 121 pts                                     | Range total High–Low du Pre-NY                                 |
+| Amp. Moy. Nd     | ex. 215 pts                                     | Moyenne simple des N dernières amplitudes NY (15h30–22h Paris) |
+| Faible P90       | 10% dép. — Ratio — Amp. NY maxi — **Amp. Reco** | 10% des jours dépassent ; Amp. NY = la plus grande             |
+| Fort P50         | 50% dép. — Ratio — Amp. NY mini — **Amp. Reco** | 50% des jours dépassent ; Amp. NY = la plus petite             |
 
 ### Mode Simplifié
 
 Affichage compact en 2 colonnes, sans légendes — pour utilisateurs avancés qui veulent économiser l'espace à droite du graphique :
 
-| Ligne | Colonne 0                | Colonne 1                   |
-|-------|--------------------------|-----------------------------|
-| 0     | UP ▲ / DOWN ▼            | Figé / Dynamique            |
-| 1     | « Amp. Pre-NY » (label)  | Valeur Pre-NY (ex. 121 pts) |
-| 2     | « Amp. Reco » (header)   | « Amp. NY » (header)        |
-| 3     | Amp. Reco Faible (vert)  | Amp. NY Faible (vert)       |
-| 4     | Amp. Reco Modéré (jaune) | Amp. NY Modéré (jaune)      |
-| 5     | Amp. Reco Fort (rouge)   | Amp. NY Fort (rouge)        |
+| Ligne | Colonne 0                | Colonne 1                    |
+|-------|--------------------------|------------------------------|
+| 0     | UP ▲ / DOWN ▼            | Figé / Dynamique             |
+| 1     | « Amp. Pre-NY » (label)  | Valeur Pre-NY (ex. 121 pts)  |
+| 2     | « Amp. Moy. Nd » (label) | Valeur moy. Nd (ex. 215 pts) |
+| 3     | « Amp. Reco » (header)   | « Amp. NY » (header)         |
+| 4     | Amp. Reco Faible (vert)  | Amp. NY maxi (vert)          |
+| 5     | Amp. Reco Fort (rouge)   | Amp. NY mini (rouge)         |
 
 ### Mode Masquer
 
@@ -160,9 +160,36 @@ Cache complètement le dashboard.
 
 ---
 
-Les ratios et l'amplitude recommandée sont calculés par jour de la semaine à partir des percentiles P90/P75/P50 issus des statistiques NQ (2 jan. 2024 – 2 avr. 2026, 581 jours).
+### Méthode de calcul de l'Amp. Reco (v1.9)
 
-**Formule amplitude recommandée** : `round(0.1965 × ratio × Amplitude Pre-NY)` — 0.1965 étant la moyenne des 4 distances inter-niveaux Fibo (0→38.2→50→61.8→78.6%).
+L'objectif est d'obtenir une amplitude recommandée **stable et raisonnable** pour le scalping, qui ne s'envole pas brutalement après une journée explosive (les fins de journée sont rarement aussi extrêmes que les débuts).
+
+**Étapes du calcul** :
+
+1. **Suivi automatique des amplitudes NY récentes** : à chaque session NY (15h30 → 22h Paris), l'indicateur calcule `Amp NY = High - Low` et stocke la valeur dans un historique glissant des N derniers jours de trading (N configurable, défaut **5**).
+
+2. **Estimation NY pour aujourd'hui** : on prend la plus grande estimation statistique, soit **Amp. NY P90** (ratio P90 du jour × Amp. Pre-NY), correspondant au risque faible.
+
+3. **Moyenne lissée** :
+
+   ```text
+   avg = (Amp. NY P90 + somme des N amplitudes NY récentes) / (N + 1)
+   ```
+
+4. **Deux Amp. Reco** avec deux coefficients différents :
+
+   ```text
+   Amp. Reco Faible = round(coef_faible × avg)   # défaut 0.25
+   Amp. Reco Fort   = round(coef_fort   × avg)   # défaut 0.20
+   ```
+
+**Pourquoi cette méthode ?**
+
+- **Lissage** : la somme des N derniers jours intègre la dynamique récente du marché et amortit les valeurs extrêmes.
+- **Cohérence avec les statistiques** : l'estimation P90 (Amp. NY maxi) sert d'ancrage statistique haut.
+- **Deux niveaux de risque** : `Faible` (coef 0.25) pour le contrarien prudent, `Fort` (coef 0.20) plus serré.
+
+Les ratios statistiques par jour de la semaine sont issus de l'analyse historique NQ (2 jan. 2024 – 2 avr. 2026, 581 jours de trading).
 
 ---
 
@@ -176,6 +203,14 @@ Les ratios et l'amplitude recommandée sont calculés par jour de la semaine à 
 ### Paramètres Dashboard
 
 - **Mode d'affichage** : liste déroulante — `Masquer` / `Complet` / `Simplifié`
+
+### Calcul Amp. Reco
+
+Configurable depuis le groupe **"Calcul Amp. Reco"** :
+
+- **Nb jours pour la somme** (défaut **5**) : nombre N de sessions NY précédentes utilisées dans la moyenne. La moyenne est divisée par N+1 (les N historiques + l'estimation P90 du jour).
+- **Coef. risque faible** (défaut **0.25**) : coefficient appliqué à la moyenne pour calculer l'Amp. Reco du niveau Faible.
+- **Coef. risque fort** (défaut **0.20**) : coefficient appliqué à la moyenne pour calculer l'Amp. Reco du niveau Fort.
 
 ### Niveaux (toggle maître)
 
@@ -242,6 +277,23 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 ---
 
 ## Changelog
+
+### v1.9 - 2026-05-25
+
+- **Refonte du calcul de l'Amp. Reco** : remplacement du coefficient Fibo (0.1965) par une moyenne lissée sur la session NY récente.
+- **Tracking automatique** des amplitudes NY (15h30–22h Paris) sur les N derniers jours de trading (N configurable, défaut 5).
+- **Nouvelle formule unique** :
+
+  ```text
+  avg = (Amp.NY estimée P90 + somme des N amplitudes NY récentes) / (N + 1)
+  Amp. Reco Faible = round(coef_faible × avg)  [défaut 0.25]
+  Amp. Reco Fort   = round(coef_fort   × avg)  [défaut 0.20]
+  ```
+
+- Nouveau groupe d'inputs **"Calcul Amp. Reco"** pour configurer N et les 2 coefficients.
+- Dashboard : suppression de la ligne Modéré P75 (calcul unique sur P90).
+- Dashboard : ajout d'une ligne « Amp. Moy. Nd » sous « Amplitude Pre-NY » qui affiche la moyenne simple des N dernières amplitudes NY (référence informative).
+- **Avantage vs ancien calcul** : valeurs moins extrêmes, plus stables jour après jour, car la moyenne intègre l'historique récent en plus de l'estimation statistique.
 
 ### v1.8 - 2026-05-17
 
