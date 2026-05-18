@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 1.8
+// Version: 1.9
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -17,13 +17,21 @@
 //                - Day 50% (green line at the midpoint of the day's range)
 //              - Labels on each line with level name and price value
 //              - Midnight NY Open horizontal line (configurable timezone and time)
+//              - Calcul Amp. Reco (v1.9) : moyenne unique basee sur l'amplitude NY P90
+//                (la plus grande, risque faible) et la somme des N amplitudes NY des
+//                jours precedents (15h30-22h Paris), divise par (N+1). Deux coefficients
+//                differents donnent les 2 Amp. Reco affichees (risque faible / risque fort).
+//                N et les 2 coefficients sont configurables.
 //              - Dashboard 3 modes : Masquer / Complet / Simplifie
 //                - Complet : direction (UP/DOWN), jour de la semaine, etat fige/dynamique,
-//                  amplitude Pre-NY, amplitude NY estimee et recommandee par niveau de risque
-//                  (Faible P90 / Modere P75 / Fort P50) base sur stats NQ 2024-2026
+//                  amplitude Pre-NY, amplitude moyenne sur N jours, amplitude NY estimee
+//                  et recommandee par niveau de risque (Faible P90 / Fort P50) base sur
+//                  stats NQ 2024-2026
 //                - Simplifie : 2 colonnes compactes
-//                  Col 0 : direction, label "Amp. Pre-NY", header "Amp. Reco", 3 valeurs reco
-//                  Col 1 : etat Fige/Dynamique, valeur Pre-NY, header "Amp. NY", 3 valeurs NY
+//                  Col 0 : direction, "Amp. Pre-NY", "Amp. Moy. Nd", header "Amp. Reco",
+//                          2 valeurs reco (faible / fort)
+//                  Col 1 : etat Fige/Dynamique, valeur Pre-NY, valeur Moy. Nd,
+//                          header "Amp. NY", 2 valeurs NY (maxi / mini)
 //              - Toggles maitres pour afficher/masquer rapidement les extensions
 //                (sous 0% et au-dessus 100%)
 //              - Toggle maitre "Afficher toutes les lignes" pour cacher d'un coup
@@ -35,6 +43,21 @@
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v1.9 - 2026-05-25
+//     - Refonte du calcul de l'Amp. Reco : remplacement du coefficient Fibo (0.1965) par
+//       une moyenne lissee sur la session NY recente.
+//     - Tracking automatique des amplitudes NY (15h30-22h Paris) sur les N derniers
+//       jours de trading (N configurable, defaut 5).
+//     - Nouvelle formule unique :
+//         avg = (Amp.NY estimee P90 + somme des N amplitudes NY recentes) / (N + 1)
+//         Amp. Reco faible = round(coef_faible * avg)  [defaut 0.25]
+//         Amp. Reco fort   = round(coef_fort   * avg)  [defaut 0.20]
+//     - Nouveau groupe d'inputs "Calcul Amp. Reco" pour configurer N et les 2 coefficients.
+//     - Dashboard : suppression de la ligne Modere P75 (calcul unique sur P90).
+//     - Dashboard : ajout d'une ligne "Amp. Moy. Nd" sous "Amplitude Pre-NY" qui affiche
+//       la moyenne simple des N dernieres amplitudes NY (reference informative).
+//     - Avantage vs ancien calcul : valeurs moins extremes, plus stables jour apres jour,
+//       car la moyenne integre l'historique recent en plus de l'estimation statistique.
 //   v1.8 - 2026-05-17
 //     - Ajout du greffon "Marques d'amplitude" : port de l'indicateur JCO Amplitude v2.2.0.
 //       Detection swing M1 + machine d'etats deux phases (searching/tracking) qui pose
@@ -88,6 +111,12 @@ ny_min   = input.int(30, "Minute debut NY AM",         minval=0, maxval=59, grou
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 grp_dash  = "Dashboard"
 dash_mode = input.string("Complet", "Mode d'affichage", options=["Masquer", "Complet", "Simplifie"], group=grp_dash)
+
+// ── Calcul Amp. Reco ──────────────────────────────────────────────────────────
+grp_reco         = "Calcul Amp. Reco"
+reco_n_days      = input.int(5,    "Nb jours pour la somme",  minval=1, maxval=30, group=grp_reco)
+reco_coef_faible = input.float(0.25, "Coef. risque faible (0-1)", minval=0.01, maxval=1.0, step=0.01, group=grp_reco)
+reco_coef_fort   = input.float(0.20, "Coef. risque fort (0-1)",   minval=0.01, maxval=1.0, step=0.01, group=grp_reco)
 
 // ── Niveaux (toggle maitre pour toutes les lignes Fibo et Day) ───────────────
 grp_lvl     = "Niveaux (Fibo et Day lines)"
@@ -329,6 +358,12 @@ var label lbl_day_high  = na
 var label lbl_day_low   = na
 var label lbl_day_mid   = na
 
+// Tracking des amplitudes NY historiques (15h30-22h Paris) sur 5 jours
+var float ny_session_high   = na
+var float ny_session_low    = na
+var bool  ny_session_active = false
+var array<float> ny_amp_hist = array.new<float>()
+
 var bool session_started = false   // Pre-NY : Fibo dessines au moins une fois
 var bool post_ny_started = false   // Post-NY : Day lines dessinees au moins une fois
 
@@ -449,6 +484,28 @@ if before_ny and not is_new_day
 if not is_new_day
     day_high := math.max(nz(day_high, high), high)
     day_low  := math.min(nz(day_low,  low),  low)
+
+// ── Tracking amplitude NY (15h30 - 22h Paris) sur 5 jours glissants ──────────
+// Fenetre identique a la session NY AM+PM jusqu'a 22h Paris (defaut user)
+ny_pm_close_utc = 22 * 60 - (f_is_cest(time) ? 2 : 1) * 60
+in_ny_pm = utc_total >= ny_utc and utc_total < ny_pm_close_utc
+
+if in_ny_pm
+    if not ny_session_active
+        ny_session_high   := high
+        ny_session_low    := low
+        ny_session_active := true
+    else
+        ny_session_high := math.max(ny_session_high, high)
+        ny_session_low  := math.min(ny_session_low,  low)
+else if ny_session_active
+    // Sortie de session : on pousse l'amplitude de la session NY ecoulee
+    array.push(ny_amp_hist, ny_session_high - ny_session_low)
+    if array.size(ny_amp_hist) > reco_n_days
+        array.shift(ny_amp_hist)
+    ny_session_high   := na
+    ny_session_low    := na
+    ny_session_active := false
 
 // ── Snapshot a l'ouverture NY ────────────────────────────────────────────────
 if at_ny_open
@@ -797,9 +854,22 @@ if show_mid and not na(mid_open)
 p50r = array.from(0.65, 0.77, 0.78, 0.78, 0.70)  // 50% des jours depassent
 p75r = array.from(0.92, 1.02, 1.22, 1.03, 0.90)  // 25% des jours depassent
 p90r = array.from(1.27, 1.26, 1.79, 1.33, 1.42)  // 10% des jours depassent
-// Amplitude recommandee = moyenne des 4 distances inter-niveaux Fibo (0/38.2/50/61.8/78.6)
-// FIBO_COEFF = (0.382 + 0.118 + 0.118 + 0.168) / 4 = 0.1965
-FIBO_COEFF = 0.1965
+// Amplitude recommandee : methode (v1.9)
+// La moyenne est calculee UNE SEULE FOIS avec l'amplitude NY estimee P90 (la plus grande) :
+//   avg = (Amp.NY P90 + somme amplitudes NY des N jours precedents) / (N + 1)
+// Puis deux coefficients differents donnent les deux Amp. Reco :
+//   reco_faible = round(coef_faible * avg)    [0.25 par defaut]
+//   reco_fort   = round(coef_fort   * avg)    [0.20 par defaut]
+// N et les deux coefficients sont configurables.
+reco_div = reco_n_days + 1
+
+// Somme et moyenne simple des N dernieres amplitudes NY (15h30-22h Paris)
+sum_5d_ny  = 0.0
+hist_size  = array.size(ny_amp_hist)
+if hist_size > 0
+    for i = 0 to hist_size - 1
+        sum_5d_ny += array.get(ny_amp_hist, i)
+mean_5d_ny = hist_size > 0 ? sum_5d_ny / hist_size : 0.0
 
 // Jour de la semaine → index 0-4 (week-end → Lundi par defaut)
 dow_raw  = dayofweek(time)
@@ -807,16 +877,16 @@ dow_idx  = dow_raw == 2 ? 0 : dow_raw == 3 ? 1 : dow_raw == 4 ? 2 : dow_raw == 5
 dow_name = dow_raw == 2 ? "Lundi" : dow_raw == 3 ? "Mardi" : dow_raw == 4 ? "Mercredi" : dow_raw == 5 ? "Jeudi" : dow_raw == 6 ? "Vendredi" : "Lundi"
 
 ratio_faible = array.get(p90r, dow_idx)
-ratio_modere = array.get(p75r, dow_idx)
 ratio_fort   = array.get(p50r, dow_idx)
 
-amp_ny_faible   = ratio_faible * use_amp
-amp_ny_modere   = ratio_modere * use_amp
-amp_ny_fort     = ratio_fort   * use_amp
+amp_ny_faible = ratio_faible * use_amp   // amplitude NY estimee maxi - percentile P90
+amp_ny_fort   = ratio_fort   * use_amp   // amplitude NY estimee mini - percentile P50
 
-amp_reco_faible = math.round(FIBO_COEFF * amp_ny_faible)
-amp_reco_modere = math.round(FIBO_COEFF * amp_ny_modere)
-amp_reco_fort   = math.round(FIBO_COEFF * amp_ny_fort)
+// Moyenne unique basee sur l'estimation la plus grande (P90)
+avg_reco = (amp_ny_faible + sum_5d_ny) / reco_div
+
+amp_reco_faible = math.round(reco_coef_faible * avg_reco)
+amp_reco_fort   = math.round(reco_coef_fort   * avg_reco)
 
 if barstate.islast and dash_mode != "Masquer"
     dir_str = is_down ? "DOWN  ▼" : "UP  ▲"
@@ -846,28 +916,28 @@ if barstate.islast and dash_mode != "Masquer"
         table.cell(t, 3, 1, "",                 text_size=size.small)
         table.cell(t, 4, 1, "",                 text_size=size.small)
 
-        // Ligne 2 : En-tetes colonnes
-        table.cell(t, 0, 2, "Risque",     text_color=color.gray, text_size=size.small, text_halign=text.align_left)
-        table.cell(t, 1, 2, "% dep.",     text_color=color.gray, text_size=size.small)
-        table.cell(t, 2, 2, "Ratio",      text_color=color.gray, text_size=size.small)
-        table.cell(t, 3, 2, "Amp. NY",    text_color=color.gray, text_size=size.small)
-        table.cell(t, 4, 2, "Amp. Reco",  text_color=color.gray, text_size=size.small)
+        // Ligne 2 : Amplitude moyenne sur N jours (NY session 15h30-22h Paris)
+        table.cell(t, 0, 2, "Amp. Moy. " + str.tostring(reco_n_days) + "d", text_color=color.gray, text_size=size.small, text_halign=text.align_left)
+        table.cell(t, 1, 2, str.tostring(math.round(mean_5d_ny)) + " pts", text_color=color.gray, text_size=size.small)
+        table.cell(t, 2, 2, "",                 text_size=size.small)
+        table.cell(t, 3, 2, "",                 text_size=size.small)
+        table.cell(t, 4, 2, "",                 text_size=size.small)
 
-        // Ligne 3 : Faible (P90) — 10% des jours depassent cette amplitude
-        table.cell(t, 0, 3, "Faible P90", text_color=color.new(#3fb950, 0),        text_size=size.small, text_halign=text.align_left)
-        table.cell(t, 1, 3, "10%",        text_color=color.gray,                    text_size=size.small)
-        table.cell(t, 2, 3, str.tostring(ratio_faible, "#.00") + "x",              text_color=color.gray,            text_size=size.small)
-        table.cell(t, 3, 3, str.tostring(math.round(amp_ny_faible)) + " pts",      text_color=color.gray,            text_size=size.small)
-        table.cell(t, 4, 3, str.tostring(amp_reco_faible) + " pts",                text_color=color.new(#3fb950, 0), text_size=size.small)
+        // Ligne 3 : En-tetes colonnes
+        table.cell(t, 0, 3, "Risque",     text_color=color.gray, text_size=size.small, text_halign=text.align_left)
+        table.cell(t, 1, 3, "% dep.",     text_color=color.gray, text_size=size.small)
+        table.cell(t, 2, 3, "Ratio",      text_color=color.gray, text_size=size.small)
+        table.cell(t, 3, 3, "Amp. NY",    text_color=color.gray, text_size=size.small)
+        table.cell(t, 4, 3, "Amp. Reco",  text_color=color.gray, text_size=size.small)
 
-        // Ligne 4 : Modere (P75) — 25% des jours depassent cette amplitude
-        table.cell(t, 0, 4, "Modere P75", text_color=color.new(#c99a2c, 0),        text_size=size.small, text_halign=text.align_left)
-        table.cell(t, 1, 4, "25%",        text_color=color.gray,                    text_size=size.small)
-        table.cell(t, 2, 4, str.tostring(ratio_modere, "#.00") + "x",              text_color=color.gray,            text_size=size.small)
-        table.cell(t, 3, 4, str.tostring(math.round(amp_ny_modere)) + " pts",      text_color=color.gray,            text_size=size.small)
-        table.cell(t, 4, 4, str.tostring(amp_reco_modere) + " pts",                text_color=color.new(#c99a2c, 0), text_size=size.small)
+        // Ligne 4 : Faible P90 - amplitude NY maxi
+        table.cell(t, 0, 4, "Faible P90", text_color=color.new(#3fb950, 0),        text_size=size.small, text_halign=text.align_left)
+        table.cell(t, 1, 4, "10%",        text_color=color.gray,                    text_size=size.small)
+        table.cell(t, 2, 4, str.tostring(ratio_faible, "#.00") + "x",              text_color=color.gray,            text_size=size.small)
+        table.cell(t, 3, 4, str.tostring(math.round(amp_ny_faible)) + " pts",      text_color=color.gray,            text_size=size.small)
+        table.cell(t, 4, 4, str.tostring(amp_reco_faible) + " pts",                text_color=color.new(#3fb950, 0), text_size=size.small)
 
-        // Ligne 5 : Fort (P50) — 50% des jours depassent cette amplitude
+        // Ligne 5 : Fort P50 - amplitude NY mini
         table.cell(t, 0, 5, "Fort   P50", text_color=color.new(#ff7b72, 0),        text_size=size.small, text_halign=text.align_left)
         table.cell(t, 1, 5, "50%",        text_color=color.gray,                    text_size=size.small)
         table.cell(t, 2, 5, str.tostring(ratio_fort, "#.00") + "x",                text_color=color.gray,            text_size=size.small)
@@ -883,20 +953,20 @@ if barstate.islast and dash_mode != "Masquer"
              bgcolor      = color.new(color.gray, 85),
              border_width = 0)
 
-        // Colonne 0 : direction, label Amp. Pre-NY, header Amp. Reco, valeurs reco
+        // Colonne 0 : direction, label Amp. Pre-NY, label Amp. Moy. Nd, header Amp. Reco, valeurs reco
         table.cell(ts, 0, 0, dir_str,                                       text_color=dir_col,               text_size=size.small)
         table.cell(ts, 0, 1, "Amp. Pre-NY",                                 text_color=color.gray,            text_size=size.small)
-        table.cell(ts, 0, 2, "Amp. Reco",                                   text_color=color.gray,            text_size=size.small)
-        table.cell(ts, 0, 3, str.tostring(amp_reco_faible) + " pts",        text_color=color.new(#3fb950, 0), text_size=size.small)
-        table.cell(ts, 0, 4, str.tostring(amp_reco_modere) + " pts",        text_color=color.new(#c99a2c, 0), text_size=size.small)
+        table.cell(ts, 0, 2, "Amp. Moy. " + str.tostring(reco_n_days) + "d", text_color=color.gray,            text_size=size.small)
+        table.cell(ts, 0, 3, "Amp. Reco",                                   text_color=color.gray,            text_size=size.small)
+        table.cell(ts, 0, 4, str.tostring(amp_reco_faible) + " pts",        text_color=color.new(#3fb950, 0), text_size=size.small)
         table.cell(ts, 0, 5, str.tostring(amp_reco_fort)   + " pts",        text_color=color.new(#ff7b72, 0), text_size=size.small)
 
-        // Colonne 1 : etat Fige/Dynamique, valeur Pre-NY, header Amp. NY et valeurs NY estimees
+        // Colonne 1 : etat Fige/Dynamique, valeur Pre-NY, valeur Moy. Nd, header Amp. NY et valeurs NY estimees
         table.cell(ts, 1, 0, frz_str_s,                                     text_color=frz_col_s,             text_size=size.small)
         table.cell(ts, 1, 1, amp_str,                                       text_color=dir_col,               text_size=size.small)
-        table.cell(ts, 1, 2, "Amp. NY",                                     text_color=color.gray,            text_size=size.small)
-        table.cell(ts, 1, 3, str.tostring(math.round(amp_ny_faible)) + " pts", text_color=color.new(#3fb950, 0), text_size=size.small)
-        table.cell(ts, 1, 4, str.tostring(math.round(amp_ny_modere)) + " pts", text_color=color.new(#c99a2c, 0), text_size=size.small)
+        table.cell(ts, 1, 2, str.tostring(math.round(mean_5d_ny)) + " pts", text_color=color.gray,            text_size=size.small)
+        table.cell(ts, 1, 3, "Amp. NY",                                     text_color=color.gray,            text_size=size.small)
+        table.cell(ts, 1, 4, str.tostring(math.round(amp_ny_faible)) + " pts", text_color=color.new(#3fb950, 0), text_size=size.small)
         table.cell(ts, 1, 5, str.tostring(math.round(amp_ny_fort))   + " pts", text_color=color.new(#ff7b72, 0), text_size=size.small)
 
 
