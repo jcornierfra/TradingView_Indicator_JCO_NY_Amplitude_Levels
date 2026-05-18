@@ -138,8 +138,10 @@ Affiché en bas à droite du graphique. **3 modes** disponibles via la liste dé
 | Direction Pre-NY | UP / DOWN — Jour — Dynamique/Figé               | Direction, jour de la semaine, état                            |
 | Amplitude Pre-NY | ex. 121 pts                                     | Range total High–Low du Pre-NY                                 |
 | Amp. Moy. Nd     | ex. 215 pts                                     | Moyenne simple des N dernières amplitudes NY (15h30–22h Paris) |
-| Faible P90       | 10% dép. — Ratio — Amp. NY maxi — **Amp. Reco** | 10% des jours dépassent ; Amp. NY = la plus grande             |
-| Fort P50         | 50% dép. — Ratio — Amp. NY mini — **Amp. Reco** | 50% des jours dépassent ; Amp. NY = la plus petite             |
+| Faible P50       | 50% dép. — Ratio — Amp. NY mini — **Amp. Reco** | 50% des jours dépassent ; Amp. NY = mini (risque faible)       |
+| Fort P90         | 10% dép. — Ratio — Amp. NY maxi — **Amp. Reco** | 10% des jours dépassent ; Amp. NY = maxi (gros risque)         |
+
+Logique d'affichage : petite amplitude (en haut, vert) = petit risque pour le trader, grande amplitude (en bas, rouge) = gros risque.
 
 ### Mode Simplifié
 
@@ -151,8 +153,8 @@ Affichage compact en 2 colonnes, sans légendes — pour utilisateurs avancés q
 | 1     | « Amp. Pre-NY » (label)  | Valeur Pre-NY (ex. 121 pts)  |
 | 2     | « Amp. Moy. Nd » (label) | Valeur moy. Nd (ex. 215 pts) |
 | 3     | « Amp. Reco » (header)   | « Amp. NY » (header)         |
-| 4     | Amp. Reco Faible (vert)  | Amp. NY maxi (vert)          |
-| 5     | Amp. Reco Fort (rouge)   | Amp. NY mini (rouge)         |
+| 4     | Amp. Reco Faible (vert)  | Amp. NY mini (vert)          |
+| 5     | Amp. Reco Fort (rouge)   | Amp. NY maxi (rouge)         |
 
 ### Mode Masquer
 
@@ -277,6 +279,15 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 ---
 
 ## Changelog
+
+### v1.10 - 2026-05-26
+
+- **Dashboard** : inversion des amplitudes NY estimées affichées.
+  - En haut (vert, risque Faible) : **Amp. NY mini** (P50)
+  - En bas (rouge, risque Fort) : **Amp. NY maxi** (P90)
+- Logique : petite amplitude = petit risque, grande amplitude = gros risque.
+- Le ratio et le % dépassement suivent le swap (50% en haut, 10% en bas).
+- Le calcul interne de la moyenne est inchangé (toujours basé sur P90 pour la stabilité).
 
 ### v1.9 - 2026-05-25
 

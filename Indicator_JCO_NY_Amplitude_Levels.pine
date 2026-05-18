@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 1.9
+// Version: 1.10
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -25,8 +25,8 @@
 //              - Dashboard 3 modes : Masquer / Complet / Simplifie
 //                - Complet : direction (UP/DOWN), jour de la semaine, etat fige/dynamique,
 //                  amplitude Pre-NY, amplitude moyenne sur N jours, amplitude NY estimee
-//                  et recommandee par niveau de risque (Faible P90 / Fort P50) base sur
-//                  stats NQ 2024-2026
+//                  et recommandee par niveau de risque (Faible P50 = amp mini en haut,
+//                  Fort P90 = amp maxi en bas) base sur stats NQ 2024-2026
 //                - Simplifie : 2 colonnes compactes
 //                  Col 0 : direction, "Amp. Pre-NY", "Amp. Moy. Nd", header "Amp. Reco",
 //                          2 valeurs reco (faible / fort)
@@ -43,6 +43,13 @@
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v1.10 - 2026-05-26
+//     - Dashboard : inversion des amplitudes NY estimees affichees.
+//       En haut (vert, risque Faible) : Amp. NY MINI (P50)
+//       En bas (rouge, risque Fort)   : Amp. NY MAXI (P90)
+//       Logique : petite amplitude = petit risque, grande amplitude = gros risque.
+//       Le ratio et le % depassement suivent (50% en haut, 10% en bas).
+//       Le calcul interne de avg ne change pas (toujours base sur P90 pour la stabilite).
 //   v1.9 - 2026-05-25
 //     - Refonte du calcul de l'Amp. Reco : remplacement du coefficient Fibo (0.1965) par
 //       une moyenne lissee sur la session NY recente.
@@ -930,18 +937,18 @@ if barstate.islast and dash_mode != "Masquer"
         table.cell(t, 3, 3, "Amp. NY",    text_color=color.gray, text_size=size.small)
         table.cell(t, 4, 3, "Amp. Reco",  text_color=color.gray, text_size=size.small)
 
-        // Ligne 4 : Faible P90 - amplitude NY maxi
-        table.cell(t, 0, 4, "Faible P90", text_color=color.new(#3fb950, 0),        text_size=size.small, text_halign=text.align_left)
-        table.cell(t, 1, 4, "10%",        text_color=color.gray,                    text_size=size.small)
-        table.cell(t, 2, 4, str.tostring(ratio_faible, "#.00") + "x",              text_color=color.gray,            text_size=size.small)
-        table.cell(t, 3, 4, str.tostring(math.round(amp_ny_faible)) + " pts",      text_color=color.gray,            text_size=size.small)
+        // Ligne 4 : Faible P50 - amplitude NY mini (faible amplitude = faible risque)
+        table.cell(t, 0, 4, "Faible P50", text_color=color.new(#3fb950, 0),        text_size=size.small, text_halign=text.align_left)
+        table.cell(t, 1, 4, "50%",        text_color=color.gray,                    text_size=size.small)
+        table.cell(t, 2, 4, str.tostring(ratio_fort, "#.00") + "x",                text_color=color.gray,            text_size=size.small)
+        table.cell(t, 3, 4, str.tostring(math.round(amp_ny_fort)) + " pts",        text_color=color.gray,            text_size=size.small)
         table.cell(t, 4, 4, str.tostring(amp_reco_faible) + " pts",                text_color=color.new(#3fb950, 0), text_size=size.small)
 
-        // Ligne 5 : Fort P50 - amplitude NY mini
-        table.cell(t, 0, 5, "Fort   P50", text_color=color.new(#ff7b72, 0),        text_size=size.small, text_halign=text.align_left)
-        table.cell(t, 1, 5, "50%",        text_color=color.gray,                    text_size=size.small)
-        table.cell(t, 2, 5, str.tostring(ratio_fort, "#.00") + "x",                text_color=color.gray,            text_size=size.small)
-        table.cell(t, 3, 5, str.tostring(math.round(amp_ny_fort)) + " pts",        text_color=color.gray,            text_size=size.small)
+        // Ligne 5 : Fort P90 - amplitude NY maxi (grosse amplitude = gros risque)
+        table.cell(t, 0, 5, "Fort   P90", text_color=color.new(#ff7b72, 0),        text_size=size.small, text_halign=text.align_left)
+        table.cell(t, 1, 5, "10%",        text_color=color.gray,                    text_size=size.small)
+        table.cell(t, 2, 5, str.tostring(ratio_faible, "#.00") + "x",              text_color=color.gray,            text_size=size.small)
+        table.cell(t, 3, 5, str.tostring(math.round(amp_ny_faible)) + " pts",      text_color=color.gray,            text_size=size.small)
         table.cell(t, 4, 5, str.tostring(amp_reco_fort) + " pts",                  text_color=color.new(#ff7b72, 0), text_size=size.small)
     else
         // ===== Mode Simplifie : 2 colonnes (Amp. Reco | Amp. NY), sans legendes =====
@@ -966,8 +973,8 @@ if barstate.islast and dash_mode != "Masquer"
         table.cell(ts, 1, 1, amp_str,                                       text_color=dir_col,               text_size=size.small)
         table.cell(ts, 1, 2, str.tostring(math.round(mean_5d_ny)) + " pts", text_color=color.gray,            text_size=size.small)
         table.cell(ts, 1, 3, "Amp. NY",                                     text_color=color.gray,            text_size=size.small)
-        table.cell(ts, 1, 4, str.tostring(math.round(amp_ny_faible)) + " pts", text_color=color.new(#3fb950, 0), text_size=size.small)
-        table.cell(ts, 1, 5, str.tostring(math.round(amp_ny_fort))   + " pts", text_color=color.new(#ff7b72, 0), text_size=size.small)
+        table.cell(ts, 1, 4, str.tostring(math.round(amp_ny_fort))   + " pts", text_color=color.new(#3fb950, 0), text_size=size.small)
+        table.cell(ts, 1, 5, str.tostring(math.round(amp_ny_faible)) + " pts", text_color=color.new(#ff7b72, 0), text_size=size.small)
 
 
 // ═══════════════════════════════════════════════════════════════════════════
