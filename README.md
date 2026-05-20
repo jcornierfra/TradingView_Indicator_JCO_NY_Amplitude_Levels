@@ -148,7 +148,7 @@ Sans cette option (défaut), la state machine tourne en continu : si elle était
 - **Auto NY** (défaut : décoché) — surcharge Amp1/Amp2 avec les Amp. Reco du dashboard
 - **Ajuster les amplitudes avant NY AM** + **Coef pre-NY AM** (défauts : décoché / 0.5)
 - **Prix par point** (défaut : 1.0 pour NQ/MNQ/ES)
-- **Swing left/right bars** (défaut : 1/1) — sensibilité de la détection swing
+- **Swing left/right bars** (défaut : 3/3) — sensibilité de la détection swing (pivot strict sur 7 bougies M1)
 - **Fenêtre horaire + Timezone** (défaut : 7h–22h Paris)
 - **Largeur marque** (défaut : 2 bars), **épaisseur trait**, **couleurs bull/bear** — personnalisation visuelle
 
@@ -285,7 +285,7 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 - **Ajuster les amplitudes avant NY AM** (défaut **coché** depuis v1.12) + **Coef pre-NY AM** (défaut 0.5)
 - **Restart recherche Amp1 à chaque session** (défaut décoché) — relance une recherche fraîche au début de la fenêtre et à l'open NY AM
 - **Prix par point** : 1.0 pour NQ/MNQ/ES
-- **Swing left/right bars** : sensibilité de détection (défaut 1/1)
+- **Swing left/right bars** : sensibilité de détection (défaut **3/3** depuis v1.13)
 - **Fenêtre horaire** : début/fin (défaut 7h–22h) + **Timezone** (mêmes options que Midnight NY, défaut Paris)
 - **Largeur marque** (défaut 2 bars), **épaisseur trait, couleurs bull/bear**
 
@@ -309,6 +309,11 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 ---
 
 ## Changelog
+
+### v1.13 - 2026-05-20
+
+- **Greffon — détection de swing** : `Swing left bars` et `Swing right bars` passent de **1/1 à 3/3** par défaut. Le pivot doit désormais être le strict min/max sur **7 bougies M1** (3 à gauche + pivot + 3 à droite) au lieu de 3. Moins de pollution par les micro-swings, `swingPrice` plus stable entre les vrais mouvements.
+- Impacte uniquement la **Phase 1 searching** (première marque de la journée et, si l'option *Restart* est cochée, première marque de chaque session). Le tracking (continuations Amp2, reversals Amp1) est strictement inchangé — il utilise les extrêmes dynamiques (`refExtreme`, `oppExtreme`, etc.), pas les swings.
 
 ### v1.12 - 2026-05-20
 

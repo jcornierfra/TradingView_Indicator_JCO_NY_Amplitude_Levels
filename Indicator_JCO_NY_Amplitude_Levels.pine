@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 1.12
+// Version: 1.13
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -43,6 +43,14 @@
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v1.13 - 2026-05-20
+//     - Greffon : Swing left/right bars passe de 1+1 a 3+3 par defaut.
+//       Detection de pivot plus conservatrice (le pivot doit etre le strict
+//       min/max sur 7 bougies M1 au lieu de 3), moins de pollution par les
+//       micro-swings, swingPrice plus stable. Impacte uniquement la Phase 1
+//       searching (1ere marque de la journee, et a chaque session si l'option
+//       Restart est activee). Le tracking (continuations / reversals) est
+//       inchange car il utilise les extremes dynamiques, pas les swings.
 //   v1.12 - 2026-05-20
 //     - Greffon : fix de coherence de la state machine. Auparavant, modifier
 //       l'heure de debut de fenetre changeait les marques affichees plus tard
@@ -269,8 +277,8 @@ amp_auto_ny     = input.bool(true,  "Auto NY (utilise les Amp. Reco du dashboard
 amp1Pts         = input.float(100,  "Amp1 (1ere / reversal) - ignore si Auto NY", minval=1, group=grp_marks)
 amp2Pts         = input.float(60,   "Amp2 (continuation) - ignore si Auto NY",    minval=1, group=grp_marks)
 amp_pointSize   = input.float(1.0,  "Prix par point (NQ/MNQ/ES = 1)", minval=0.01, step=0.05, group=grp_marks)
-amp_leftBars    = input.int(1,      "Swing left bars",                minval=1, maxval=20, group=grp_marks)
-amp_rightBars   = input.int(1,      "Swing right bars",               minval=1, maxval=20, group=grp_marks)
+amp_leftBars    = input.int(3,      "Swing left bars",                minval=1, maxval=20, group=grp_marks)
+amp_rightBars   = input.int(3,      "Swing right bars",               minval=1, maxval=20, group=grp_marks)
 amp_startHour   = input.int(7,      "Debut h",                        minval=0, maxval=23, group=grp_marks, inline="m_start")
 amp_startMinute = input.int(0,      "min",                            minval=0, maxval=59, group=grp_marks, inline="m_start")
 amp_endHour     = input.int(22,     "Fin   h",                        minval=0, maxval=24, group=grp_marks, inline="m_end")
