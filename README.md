@@ -118,7 +118,7 @@ Le path (amp1 vs amp2) est ré-évalué uniquement quand l'extrême opposé fait
 
 ### Auto NY (v1.11)
 
-Case à cocher **Auto NY** : si activée, les valeurs `Amp1` et `Amp2` du greffon sont remplacées automatiquement par les **Amp. Reco** du dashboard :
+Case à cocher **Auto NY** (activée par défaut depuis v1.12) : `Amp1` et `Amp2` du greffon sont remplacés automatiquement par les **Amp. Reco** du dashboard :
 
 - `Amp1` ← Amp. Reco **Faible** (vert, risque faible — plus grande amplitude)
 - `Amp2` ← Amp. Reco **Fort** (rouge, risque fort — plus petite amplitude)
@@ -127,9 +127,19 @@ Pratique pour adapter automatiquement le greffon à la volatilité récente du m
 
 ### Ajustement pré-NY AM (v1.11)
 
-Case à cocher **Ajuster les amplitudes avant NY AM** + coefficient configurable (défaut **0.5**). Avant l'heure NY AM définie dans le groupe « Session NY AM » (Paris), `Amp1` et `Amp2` (qu'ils soient saisis manuellement ou issus de Auto NY) sont multipliés par ce coef. À 15h30 Paris, on revient automatiquement aux valeurs pleines.
+Case à cocher **Ajuster les amplitudes avant NY AM** (activée par défaut depuis v1.12) + coefficient configurable (défaut **0.5**). Avant l'heure NY AM définie dans le groupe « Session NY AM » (Paris), `Amp1` et `Amp2` (qu'ils soient saisis manuellement ou issus de Auto NY) sont multipliés par ce coef. À 15h30 Paris, on revient automatiquement aux valeurs pleines.
 
 Exemple : Amp1 = 100, Amp2 = 60, coef = 0.5. Avant 15h30 Paris → Amp1 = 50, Amp2 = 30. À partir de 15h30 → Amp1 = 100, Amp2 = 60. Permet de coller à la volatilité réduite des séances asiatique et européenne tout en gardant la pleine amplitude pendant la session NY.
+
+### Restart à chaque session (v1.12)
+
+Case à cocher **Restart recherche Amp1 à chaque session** (décochée par défaut). Si activée, l'état tracking est effacé au **début de la fenêtre** (par défaut 7h Paris) et à l'**open NY AM** (15h30 Paris) — le greffon repasse en phase `searching` pour poser une nouvelle marque Amp1.
+
+Les **swings high/low** détectés juste avant l'ouverture sont **conservés** comme référence. Un mouvement amorcé juste avant l'open continue donc de compter dans le calcul Amp1.
+
+Exemple : à 15h29 une bougie haussière de 30 pts forme un swing low à X. À 15h30, l'open NY AM réinitialise la phase à `searching` (swing low toujours = X). Si la bougie d'open monte de 80 pts (high atteint X+110), le trigger `swing + Amp1 (100)` est atteint → marque Amp1 posée.
+
+Sans cette option (défaut), la state machine tourne en continu : si elle était déjà en phase tracking avant l'ouverture, elle reste en tracking et pose des marques de continuation/reversal selon la logique habituelle.
 
 ### Paramètres principaux
 
@@ -270,9 +280,10 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 ### Paramètres greffon Marques d'amplitude
 
 - **Afficher les marques** : toggle global du greffon
-- **Auto NY** (défaut décoché) : surcharge Amp1/Amp2 avec les Amp. Reco du dashboard (Faible → Amp1, Fort → Amp2)
+- **Auto NY** (défaut **coché** depuis v1.12) : surcharge Amp1/Amp2 avec les Amp. Reco du dashboard (Faible → Amp1, Fort → Amp2)
 - **Amp1** / **Amp2** : amplitudes en points (défaut 100 / 60)
-- **Ajuster les amplitudes avant NY AM** + **Coef pre-NY AM** (défauts : décoché / 0.5)
+- **Ajuster les amplitudes avant NY AM** (défaut **coché** depuis v1.12) + **Coef pre-NY AM** (défaut 0.5)
+- **Restart recherche Amp1 à chaque session** (défaut décoché) — relance une recherche fraîche au début de la fenêtre et à l'open NY AM
 - **Prix par point** : 1.0 pour NQ/MNQ/ES
 - **Swing left/right bars** : sensibilité de détection (défaut 1/1)
 - **Fenêtre horaire** : début/fin (défaut 7h–22h) + **Timezone** (mêmes options que Midnight NY, défaut Paris)
@@ -298,6 +309,14 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 ---
 
 ## Changelog
+
+### v1.12 - 2026-05-20
+
+- **Greffon — fix de cohérence** : la state machine tourne désormais 24h/24. Auparavant, modifier l'heure de début de fenêtre (`Debut h`) changeait les marques affichées plus tard dans la journée, car la state machine ne démarrait qu'à l'ouverture et les phases (searching/tracking) divergeaient. Désormais, seul le **dessin** des marques est filtré par la fenêtre horaire — la logique interne est cohérente quelle que soit l'heure de début.
+- **Greffon — détection swing 24h/24** : la recherche de swing low/high tournait auparavant uniquement en phase `searching`. Elle tourne désormais en continu (y compris pendant le tracking). Le dernier swing détecté est toujours disponible comme référence.
+- **Greffon — conservation du swing aux resets** : `swingPrice` / `swingTime` / `swingType` ne sont plus effacés ni au reset journalier (minuit) ni au reset de session. Un mouvement amorcé juste avant une ouverture continue de compter dans le calcul Amp1.
+- **Greffon — nouvelle option `Restart recherche Amp1 à chaque session`** (décoché par défaut). Si activée, l'état tracking est effacé au début de la fenêtre et à l'open NY AM → nouvelle marque Amp1 fraîche, en gardant le dernier swing comme référence.
+- **Defaults greffon** : `Auto NY` et `Ajuster les amplitudes avant NY AM` sont désormais **activés par défaut**.
 
 ### v1.11 - 2026-05-20
 
