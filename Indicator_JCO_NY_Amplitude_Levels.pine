@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 1.10
+// Version: 1.11
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -43,6 +43,18 @@
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v1.11 - 2026-05-20
+//     - Greffon : timezone configurable pour la fenetre horaire (liste deroulante,
+//       memes options que la ligne Midnight NY). Defaut : Paris.
+//     - Greffon : case a cocher "Auto NY" qui surcharge Amp1/Amp2 avec les Amp. Reco
+//       du dashboard (Amp1 <- reco faible/vert, Amp2 <- reco fort/rouge).
+//     - Greffon : case a cocher "Ajuster les amplitudes avant NY AM" + coef configurable
+//       (defaut 0.5). Avant l'heure NY AM definie en tete d'indicateur (Paris), Amp1
+//       et Amp2 sont multiplies par ce coef. Permet d'adapter le greffon a la volatilite
+//       reduite des seances asiatiques et europeennes.
+//     - Calcul Amp. Reco : coef. risque faible passe de 0.25 a 0.30 par defaut.
+//     - Greffon : valeurs par defaut affinees - Amp1 = 100 pts (etait 80),
+//       Debut fenetre = 7h (etait 8h), Largeur marque = 2 bars (etait 1.4).
 //   v1.10 - 2026-05-26
 //     - Dashboard : inversion des amplitudes NY estimees affichees.
 //       En haut (vert, risque Faible) : Amp. NY MINI (P50)
@@ -122,7 +134,7 @@ dash_mode = input.string("Complet", "Mode d'affichage", options=["Masquer", "Com
 // ── Calcul Amp. Reco ──────────────────────────────────────────────────────────
 grp_reco         = "Calcul Amp. Reco"
 reco_n_days      = input.int(5,    "Nb jours pour la somme",  minval=1, maxval=30, group=grp_reco)
-reco_coef_faible = input.float(0.25, "Coef. risque faible (0-1)", minval=0.01, maxval=1.0, step=0.01, group=grp_reco)
+reco_coef_faible = input.float(0.30, "Coef. risque faible (0-1)", minval=0.01, maxval=1.0, step=0.01, group=grp_reco)
 reco_coef_fort   = input.float(0.20, "Coef. risque fort (0-1)",   minval=0.01, maxval=1.0, step=0.01, group=grp_reco)
 
 // ── Niveaux (toggle maitre pour toutes les lignes Fibo et Day) ───────────────
@@ -233,20 +245,30 @@ mid_minute  = input.int(0, "Minute (0-59)",  minval=0, maxval=59, group=grp_mid)
 
 // ── Greffon : Marques d'amplitude (port de JCO Amplitude v2.2.0) ─────────────
 grp_marks       = "Marques d'amplitude (greffon)"
-show_marks      = input.bool(true, "Afficher les marques",                      group=grp_marks)
-amp1Pts         = input.float(80,  "Amp1 (1ere / reversal)",        minval=1,   group=grp_marks)
-amp2Pts         = input.float(60,  "Amp2 (continuation)",           minval=1,   group=grp_marks)
-amp_pointSize   = input.float(1.0, "Prix par point (NQ/MNQ/ES = 1)", minval=0.01, step=0.05, group=grp_marks)
-amp_leftBars    = input.int(1,     "Swing left bars",               minval=1, maxval=20, group=grp_marks)
-amp_rightBars   = input.int(1,     "Swing right bars",              minval=1, maxval=20, group=grp_marks)
-amp_startHour   = input.int(8,     "Debut (Paris) h",               minval=0, maxval=23, group=grp_marks, inline="m_start")
-amp_startMinute = input.int(0,     "min",                           minval=0, maxval=59, group=grp_marks, inline="m_start")
-amp_endHour     = input.int(22,    "Fin   (Paris) h",               minval=0, maxval=24, group=grp_marks, inline="m_end")
-amp_endMinute   = input.int(0,     "min",                           minval=0, maxval=59, group=grp_marks, inline="m_end")
-markerWidthBars = input.float(1.4, "Largeur marque (bars)",         minval=0.5, step=0.1, group=grp_marks)
-amp_lineWidth   = input.int(2,     "Epaisseur trait",               minval=1, maxval=10, group=grp_marks)
+show_marks      = input.bool(true,  "Afficher les marques",                      group=grp_marks)
+amp_auto_ny     = input.bool(false, "Auto NY (utilise les Amp. Reco du dashboard)", group=grp_marks)
+amp1Pts         = input.float(100,  "Amp1 (1ere / reversal) - ignore si Auto NY", minval=1, group=grp_marks)
+amp2Pts         = input.float(60,   "Amp2 (continuation) - ignore si Auto NY",    minval=1, group=grp_marks)
+amp_pointSize   = input.float(1.0,  "Prix par point (NQ/MNQ/ES = 1)", minval=0.01, step=0.05, group=grp_marks)
+amp_leftBars    = input.int(1,      "Swing left bars",                minval=1, maxval=20, group=grp_marks)
+amp_rightBars   = input.int(1,      "Swing right bars",               minval=1, maxval=20, group=grp_marks)
+amp_startHour   = input.int(7,      "Debut h",                        minval=0, maxval=23, group=grp_marks, inline="m_start")
+amp_startMinute = input.int(0,      "min",                            minval=0, maxval=59, group=grp_marks, inline="m_start")
+amp_endHour     = input.int(22,     "Fin   h",                        minval=0, maxval=24, group=grp_marks, inline="m_end")
+amp_endMinute   = input.int(0,      "min",                            minval=0, maxval=59, group=grp_marks, inline="m_end")
+amp_tz          = input.string("Paris", "Timezone fenetre",
+                      options=["New York","Chicago","Los Angeles","London","Paris","Berlin","Tokyo","Hong Kong","Sydney","UTC"],
+                      group=grp_marks)
+markerWidthBars = input.float(2,    "Largeur marque (bars)",          minval=0.5, step=0.1, group=grp_marks)
+amp_lineWidth   = input.int(2,      "Epaisseur trait",                minval=1, maxval=10, group=grp_marks)
+amp_preNyAdjust = input.bool(false, "Ajuster les amplitudes avant NY AM", group=grp_marks)
+amp_preNyCoef   = input.float(0.5,  "Coef pre-NY AM (applique a Amp1 et Amp2)", minval=0.01, step=0.05, group=grp_marks)
 amp_bullColor   = input.color(color.new(#00C853, 10), "Couleur haussiere (signal achat)", group=grp_marks)
 amp_bearColor   = input.color(color.new(#FF1744, 10), "Couleur baissiere (signal vente)", group=grp_marks)
+
+// Effective amp1/amp2 values (overridden if Auto NY is enabled, apres dashboard reco)
+amp1Pts_eff = amp1Pts
+amp2Pts_eff = amp2Pts
 
 // ── Detection heure d'ete Paris (CEST = GMT+2) ────────────────────────────────
 // Dernier dimanche de mars -> dernier dimanche d'octobre
@@ -895,6 +917,13 @@ avg_reco = (amp_ny_faible + sum_5d_ny) / reco_div
 amp_reco_faible = math.round(reco_coef_faible * avg_reco)
 amp_reco_fort   = math.round(reco_coef_fort   * avg_reco)
 
+// Auto NY : surcharge amp1/amp2 du greffon avec les Amp. Reco du dashboard
+//  - amp1 (plus grande, signal contrarien) <- amp_reco_faible (vert, risque faible)
+//  - amp2 (plus petite, continuation)      <- amp_reco_fort   (rouge, risque fort)
+if amp_auto_ny
+    amp1Pts_eff := amp_reco_faible / amp_pointSize
+    amp2Pts_eff := amp_reco_fort   / amp_pointSize
+
 if barstate.islast and dash_mode != "Masquer"
     dir_str = is_down ? "DOWN  ▼" : "UP  ▲"
     dir_col = is_down ? color.new(#ff7b72, 0) : color.new(#3fb950, 0)
@@ -983,6 +1012,9 @@ if barstate.islast and dash_mode != "Masquer"
 // Force la TF M1 via request.security_lower_tf() quelle que soit la TF du chart
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Timezone IANA pour la fenetre horaire du greffon (DST gere automatiquement)
+amp_tz_id = f_tz(amp_tz)
+
 // === Type Etat ===
 type AmpState
     string phase           // "searching" | "tracking"
@@ -1042,8 +1074,8 @@ f_processAmpBar(float h, float l, int t) =>
         array.shift(amp_hist_l)
         array.shift(amp_hist_t)
 
-    // 2) Reset journalier (minuit Europe/Paris)
-    int dk = year(t, "Europe/Paris") * 10000 + month(t, "Europe/Paris") * 100 + dayofmonth(t, "Europe/Paris")
+    // 2) Reset journalier (minuit dans la timezone choisie)
+    int dk = year(t, amp_tz_id) * 10000 + month(t, amp_tz_id) * 100 + dayofmonth(t, amp_tz_id)
     if amp_s.lastDayKey != 0 and dk != amp_s.lastDayKey
         amp_s.phase           := "searching"
         amp_s.direction       := na
@@ -1091,15 +1123,24 @@ f_processAmpBar(float h, float l, int t) =>
                     amp_s.swingTime  := pivotTime
                     amp_s.swingType  := "high"
 
-    // 4) Fenetre horaire
-    int minutesNow = hour(t, "Europe/Paris") * 60 + minute(t, "Europe/Paris")
+    // 4) Fenetre horaire (DST gere automatiquement par la timezone IANA)
+    int minutesNow = hour(t, amp_tz_id) * 60 + minute(t, amp_tz_id)
     int startMins  = amp_startHour * 60 + amp_startMinute
     int endMins    = amp_endHour   * 60 + amp_endMinute
     bool inWindow  = minutesNow >= startMins and minutesNow < endMins
 
+    // Ajustement pre-NY AM : si actif et si on est avant l'heure NY AM (Paris, ref. indicateur),
+    // on applique le coef aux deux amplitudes Amp1 / Amp2.
+    int   parisMins   = hour(t, "Europe/Paris") * 60 + minute(t, "Europe/Paris")
+    int   nyAmMins    = ny_hour * 60 + ny_min
+    bool  beforeNyAM  = parisMins < nyAmMins
+    float preNyMult   = (amp_preNyAdjust and beforeNyAM) ? amp_preNyCoef : 1.0
+    float amp1Pts_now = amp1Pts_eff * preNyMult
+    float amp2Pts_now = amp2Pts_eff * preNyMult
+
     if inWindow
-        float amp1Price = amp1Pts * amp_pointSize
-        float amp2Price = amp2Pts * amp_pointSize
+        float amp1Price = amp1Pts_now * amp_pointSize
+        float amp2Price = amp2Pts_now * amp_pointSize
 
         // -------- Phase 1 : searching --------
         if amp_s.phase == "searching" and not na(amp_s.swingPrice)
@@ -1110,7 +1151,7 @@ f_processAmpBar(float h, float l, int t) =>
                     amp_s.phase           := "tracking"
                     amp_s.direction       := "up"
                     amp_s.origin          := amp_s.swingPrice
-                    amp_s.activeAmpPts    := amp1Pts
+                    amp_s.activeAmpPts    := amp1Pts_now
                     amp_s.refExtreme      := triggerPrice
                     amp_s.oppExtreme      := triggerPrice
                     amp_s.localOpp        := triggerPrice
@@ -1124,7 +1165,7 @@ f_processAmpBar(float h, float l, int t) =>
                     amp_s.phase           := "tracking"
                     amp_s.direction       := "down"
                     amp_s.origin          := amp_s.swingPrice
-                    amp_s.activeAmpPts    := amp1Pts
+                    amp_s.activeAmpPts    := amp1Pts_now
                     amp_s.refExtreme      := triggerPrice
                     amp_s.oppExtreme      := triggerPrice
                     amp_s.localOpp        := triggerPrice
@@ -1183,7 +1224,7 @@ f_processAmpBar(float h, float l, int t) =>
                 f_drawAmpMarker(revTrigger, useBearColor, t)
                 amp_s.direction       := newDirection
                 amp_s.origin          := amp_s.refExtreme
-                amp_s.activeAmpPts    := amp1Pts
+                amp_s.activeAmpPts    := amp1Pts_now
                 amp_s.refExtreme      := revTrigger
                 amp_s.oppExtreme      := revTrigger
                 amp_s.localOpp        := revTrigger
@@ -1194,8 +1235,8 @@ f_processAmpBar(float h, float l, int t) =>
 
             // Regle 2 : Continuation (path-driven : amp1 ou amp2 selon currentPath)
             if not markPlaced
-                float ampPathPrice = amp_s.currentPath == "amp1" ? amp1Price : amp2Price
-                float ampPathPts   = amp_s.currentPath == "amp1" ? amp1Pts   : amp2Pts
+                float ampPathPrice = amp_s.currentPath == "amp1" ? amp1Price   : amp2Price
+                float ampPathPts   = amp_s.currentPath == "amp1" ? amp1Pts_now : amp2Pts_now
                 if recovery >= ampPathPrice
                     float contTrigger = amp_s.direction == "up" ? amp_s.oppExtreme + ampPathPrice : amp_s.oppExtreme - ampPathPrice
                     bool useBearColor = amp_s.direction == "up"

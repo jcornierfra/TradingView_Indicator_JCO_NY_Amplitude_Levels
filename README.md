@@ -87,7 +87,7 @@ Greffon intégré (port de l'indicateur **JCO Amplitude v2.2.0**) qui pose autom
 
 ![Logique amp1/amp2 continuation](Amplitude_1_2_continuation.png)
 
-### Principe
+### Principe du greffon
 
 Mécanique à deux phases :
 
@@ -112,18 +112,35 @@ Le path (amp1 vs amp2) est ré-évalué uniquement quand l'extrême opposé fait
 ### Spécificités techniques
 
 - **Force la timeframe M1** quelle que soit la TF du chart, via `request.security_lower_tf()`. Permet d'utiliser un chart M5, M15, H1 pour le contexte tout en gardant la finesse de déclenchement M1.
-- **Fenêtre d'affichage** configurable (défaut : 8h–22h Paris).
-- **Reset journalier** à minuit Paris.
+- **Fenêtre d'affichage** configurable, avec **timezone configurable** (mêmes options que la ligne Midnight NY ; défaut : 7h–22h Paris).
+- **Reset journalier** à minuit dans la timezone choisie.
 - Toggle `Afficher les marques` pour activer/désactiver le greffon (case à cocher en tête du groupe).
+
+### Auto NY (v1.11)
+
+Case à cocher **Auto NY** : si activée, les valeurs `Amp1` et `Amp2` du greffon sont remplacées automatiquement par les **Amp. Reco** du dashboard :
+
+- `Amp1` ← Amp. Reco **Faible** (vert, risque faible — plus grande amplitude)
+- `Amp2` ← Amp. Reco **Fort** (rouge, risque fort — plus petite amplitude)
+
+Pratique pour adapter automatiquement le greffon à la volatilité récente du marché sans ressaisir les paramètres chaque jour.
+
+### Ajustement pré-NY AM (v1.11)
+
+Case à cocher **Ajuster les amplitudes avant NY AM** + coefficient configurable (défaut **0.5**). Avant l'heure NY AM définie dans le groupe « Session NY AM » (Paris), `Amp1` et `Amp2` (qu'ils soient saisis manuellement ou issus de Auto NY) sont multipliés par ce coef. À 15h30 Paris, on revient automatiquement aux valeurs pleines.
+
+Exemple : Amp1 = 100, Amp2 = 60, coef = 0.5. Avant 15h30 Paris → Amp1 = 50, Amp2 = 30. À partir de 15h30 → Amp1 = 100, Amp2 = 60. Permet de coller à la volatilité réduite des séances asiatique et européenne tout en gardant la pleine amplitude pendant la session NY.
 
 ### Paramètres principaux
 
-- **Amp1** (défaut : 80 pts) — amplitude pour la 1ère marque et les reversals
+- **Amp1** (défaut : 100 pts) — amplitude pour la 1ère marque et les reversals
 - **Amp2** (défaut : 60 pts) — amplitude pour les continuations
+- **Auto NY** (défaut : décoché) — surcharge Amp1/Amp2 avec les Amp. Reco du dashboard
+- **Ajuster les amplitudes avant NY AM** + **Coef pre-NY AM** (défauts : décoché / 0.5)
 - **Prix par point** (défaut : 1.0 pour NQ/MNQ/ES)
 - **Swing left/right bars** (défaut : 1/1) — sensibilité de la détection swing
-- **Fenêtre horaire** (défaut : 8h–22h Paris)
-- **Largeur marque, épaisseur trait, couleurs bull/bear** — personnalisation visuelle
+- **Fenêtre horaire + Timezone** (défaut : 7h–22h Paris)
+- **Largeur marque** (défaut : 2 bars), **épaisseur trait**, **couleurs bull/bear** — personnalisation visuelle
 
 ---
 
@@ -211,7 +228,7 @@ Les ratios statistiques par jour de la semaine sont issus de l'analyse historiqu
 Configurable depuis le groupe **"Calcul Amp. Reco"** :
 
 - **Nb jours pour la somme** (défaut **5**) : nombre N de sessions NY précédentes utilisées dans la moyenne. La moyenne est divisée par N+1 (les N historiques + l'estimation P90 du jour).
-- **Coef. risque faible** (défaut **0.25**) : coefficient appliqué à la moyenne pour calculer l'Amp. Reco du niveau Faible.
+- **Coef. risque faible** (défaut **0.30**) : coefficient appliqué à la moyenne pour calculer l'Amp. Reco du niveau Faible.
 - **Coef. risque fort** (défaut **0.20**) : coefficient appliqué à la moyenne pour calculer l'Amp. Reco du niveau Fort.
 
 ### Niveaux (toggle maître)
@@ -250,14 +267,16 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 - Timezone (New York, Chicago, Los Angeles, London, Paris, Berlin, Tokyo, Hong Kong, Sydney, UTC)
 - Heure (0–23) et Minute (0–59)
 
-### Marques d'amplitude (greffon)
+### Paramètres greffon Marques d'amplitude
 
 - **Afficher les marques** : toggle global du greffon
-- **Amp1** / **Amp2** : amplitudes en points (défaut 80 / 60)
+- **Auto NY** (défaut décoché) : surcharge Amp1/Amp2 avec les Amp. Reco du dashboard (Faible → Amp1, Fort → Amp2)
+- **Amp1** / **Amp2** : amplitudes en points (défaut 100 / 60)
+- **Ajuster les amplitudes avant NY AM** + **Coef pre-NY AM** (défauts : décoché / 0.5)
 - **Prix par point** : 1.0 pour NQ/MNQ/ES
 - **Swing left/right bars** : sensibilité de détection (défaut 1/1)
-- **Fenêtre horaire Paris** : début/fin (défaut 8h–22h)
-- **Largeur marque, épaisseur trait, couleurs bull/bear**
+- **Fenêtre horaire** : début/fin (défaut 7h–22h) + **Timezone** (mêmes options que Midnight NY, défaut Paris)
+- **Largeur marque** (défaut 2 bars), **épaisseur trait, couleurs bull/bear**
 
 ---
 
@@ -279,6 +298,14 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 ---
 
 ## Changelog
+
+### v1.11 - 2026-05-20
+
+- **Greffon** : timezone configurable pour la fenêtre horaire (liste déroulante, mêmes options que la ligne Midnight NY). Défaut : Paris.
+- **Greffon** : case à cocher **Auto NY** qui surcharge `Amp1` / `Amp2` avec les **Amp. Reco** du dashboard (`Amp1` ← reco faible / vert, `Amp2` ← reco fort / rouge).
+- **Greffon** : case à cocher **Ajuster les amplitudes avant NY AM** + coefficient configurable (défaut **0.5**). Avant l'heure NY AM définie en tête d'indicateur (Paris), `Amp1` et `Amp2` sont multipliés par ce coef. Permet d'adapter le greffon à la volatilité réduite des séances asiatiques et européennes.
+- **Calcul Amp. Reco** : coef. risque faible passe de **0.25 à 0.30** par défaut.
+- **Greffon** : valeurs par défaut affinées — **Amp1 = 100 pts** (était 80), **Début fenêtre = 7h** (était 8h), **Largeur marque = 2 bars** (était 1.4).
 
 ### v1.10 - 2026-05-26
 
