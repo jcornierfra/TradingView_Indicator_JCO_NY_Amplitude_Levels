@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 1.13
+// Version: 1.14
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -43,6 +43,18 @@
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v1.14 - 2026-05-20
+//     - Greffon : nouveau parametre "Methode detection swing" avec deux modes
+//       au choix :
+//         * "Bougies" (defaut) : pivot defini par N bougies a gauche / droite
+//           comme avant. Parametres Swing left/right bars (defaut 3/3).
+//         * "Duree" : pivot defini par une duree en minutes a gauche / droite,
+//           independante de la TF du chart. Parametres Duree avant/apres
+//           (defaut 15/15 min).
+//       Le mode Duree est utile sur les charts sub-minute (S30, S15, S1) ou
+//       le greffon retombe sur la TF du chart au lieu de M1 : la duree
+//       garantit un critere temporel coherent peu importe la granularite.
+//       Tous les modes de tracking (continuations, reversals) sont inchanges.
 //   v1.13 - 2026-05-20
 //     - Greffon : Swing left/right bars passe de 1+1 a 3+3 par defaut.
 //       Detection de pivot plus conservatrice (le pivot doit etre le strict
@@ -277,8 +289,11 @@ amp_auto_ny     = input.bool(true,  "Auto NY (utilise les Amp. Reco du dashboard
 amp1Pts         = input.float(100,  "Amp1 (1ere / reversal) - ignore si Auto NY", minval=1, group=grp_marks)
 amp2Pts         = input.float(60,   "Amp2 (continuation) - ignore si Auto NY",    minval=1, group=grp_marks)
 amp_pointSize   = input.float(1.0,  "Prix par point (NQ/MNQ/ES = 1)", minval=0.01, step=0.05, group=grp_marks)
-amp_leftBars    = input.int(3,      "Swing left bars",                minval=1, maxval=20, group=grp_marks)
-amp_rightBars   = input.int(3,      "Swing right bars",               minval=1, maxval=20, group=grp_marks)
+amp_swingMode   = input.string("Bougies", "Methode detection swing", options=["Bougies","Duree"], group=grp_marks)
+amp_leftBars    = input.int(3,      "Swing left bars - mode Bougies",  minval=1, maxval=20, group=grp_marks)
+amp_rightBars   = input.int(3,      "Swing right bars - mode Bougies", minval=1, maxval=20, group=grp_marks)
+amp_leftDurMin  = input.int(15,     "Duree avant (min) - mode Duree",  minval=1, maxval=120, group=grp_marks)
+amp_rightDurMin = input.int(15,     "Duree apres (min) - mode Duree",  minval=1, maxval=120, group=grp_marks)
 amp_startHour   = input.int(7,      "Debut h",                        minval=0, maxval=23, group=grp_marks, inline="m_start")
 amp_startMinute = input.int(0,      "min",                            minval=0, maxval=59, group=grp_marks, inline="m_start")
 amp_endHour     = input.int(22,     "Fin   h",                        minval=0, maxval=24, group=grp_marks, inline="m_end")
@@ -1158,23 +1173,60 @@ f_processAmpBar(float h, float l, int t) =>
     // detecte, meme pendant la phase tracking. Au prochain passage en searching
     // (reset journalier ou session), le declenchement Amp1 dispose ainsi d'une
     // reference fraiche au lieu d'un swing perime.
+    //
+    // Deux modes de detection au choix :
+    //   - Bougies : pivot a un offset fixe en nombre de bars (mode classique).
+    //   - Duree   : pivot defini par une duree avant/apres en minutes, donc
+    //               independant de la TF du chart (utile sur charts sub-minute).
     int n = array.size(amp_hist_h)
-    if n >= amp_leftBars + amp_rightBars + 1
-        int pivotIdx = n - 1 - amp_rightBars
+    int   pivotIdx  = -1
+    int   leftStart = -1
+    int   rightEnd  = -1
+    if amp_swingMode == "Bougies"
+        if n >= amp_leftBars + amp_rightBars + 1
+            pivotIdx  := n - 1 - amp_rightBars
+            leftStart := pivotIdx - amp_leftBars
+            rightEnd  := pivotIdx + amp_rightBars
+    else
+        // Mode Duree : on cherche le bar le plus recent dont time <= (latest_t - rightDurMs).
+        // C'est le pivot dont la fenetre droite vient juste d'etre completee.
+        int latest_t   = array.get(amp_hist_t, n - 1)
+        int rightDurMs = amp_rightDurMin * 60 * 1000
+        int leftDurMs  = amp_leftDurMin  * 60 * 1000
+        int pivotMaxT  = latest_t - rightDurMs
+        for k = n - 1 to 0
+            if pivotIdx == -1 and array.get(amp_hist_t, k) <= pivotMaxT
+                pivotIdx := k
+        if pivotIdx >= 1 and pivotIdx < n - 1
+            int pivotT      = array.get(amp_hist_t, pivotIdx)
+            int leftLimitT  = pivotT - leftDurMs
+            int rightLimitT = pivotT + rightDurMs
+            // leftStart = 1er bar dont time >= leftLimitT
+            for k = pivotIdx - 1 to 0
+                if leftStart == -1 and array.get(amp_hist_t, k) < leftLimitT
+                    leftStart := k + 1
+            if leftStart == -1
+                leftStart := 0   // fenetre gauche depasse l'historique disponible
+            // rightEnd = dernier bar dont time <= rightLimitT
+            rightEnd := pivotIdx
+            for k = pivotIdx + 1 to n - 1
+                if array.get(amp_hist_t, k) <= rightLimitT
+                    rightEnd := k
+        else
+            // Pivot non eligible (pas assez d'historique a gauche ou a droite).
+            pivotIdx := -1
+
+    if pivotIdx >= 0
         float pivotHigh = array.get(amp_hist_h, pivotIdx)
         float pivotLow  = array.get(amp_hist_l, pivotIdx)
         bool isSwingLow  = true
         bool isSwingHigh = true
-        for k = 1 to amp_leftBars
-            if array.get(amp_hist_l, pivotIdx - k) <= pivotLow
-                isSwingLow := false
-            if array.get(amp_hist_h, pivotIdx - k) >= pivotHigh
-                isSwingHigh := false
-        for k = 1 to amp_rightBars
-            if array.get(amp_hist_l, pivotIdx + k) <= pivotLow
-                isSwingLow := false
-            if array.get(amp_hist_h, pivotIdx + k) >= pivotHigh
-                isSwingHigh := false
+        for k = leftStart to rightEnd
+            if k != pivotIdx
+                if array.get(amp_hist_l, k) <= pivotLow
+                    isSwingLow := false
+                if array.get(amp_hist_h, k) >= pivotHigh
+                    isSwingHigh := false
         int pivotTime = array.get(amp_hist_t, pivotIdx)
         if isSwingLow
             if na(amp_s.swingTime) or amp_s.swingTime != pivotTime or amp_s.swingType != "low"

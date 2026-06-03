@@ -148,7 +148,9 @@ Sans cette option (défaut), la state machine tourne en continu : si elle était
 - **Auto NY** (défaut : décoché) — surcharge Amp1/Amp2 avec les Amp. Reco du dashboard
 - **Ajuster les amplitudes avant NY AM** + **Coef pre-NY AM** (défauts : décoché / 0.5)
 - **Prix par point** (défaut : 1.0 pour NQ/MNQ/ES)
-- **Swing left/right bars** (défaut : 3/3) — sensibilité de la détection swing (pivot strict sur 7 bougies M1)
+- **Méthode détection swing** (défaut : `Bougies`) — choix entre :
+  - `Bougies` : pivot défini par **Swing left/right bars** (défaut 3/3, pivot strict sur 7 bougies M1)
+  - `Durée` : pivot défini par **Durée avant/après** en minutes (défaut 15/15) — indépendant de la TF du chart, utile sur les charts sub-minute
 - **Fenêtre horaire + Timezone** (défaut : 7h–22h Paris)
 - **Largeur marque** (défaut : 2 bars), **épaisseur trait**, **couleurs bull/bear** — personnalisation visuelle
 
@@ -285,7 +287,9 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 - **Ajuster les amplitudes avant NY AM** (défaut **coché** depuis v1.12) + **Coef pre-NY AM** (défaut 0.5)
 - **Restart recherche Amp1 à chaque session** (défaut décoché) — relance une recherche fraîche au début de la fenêtre et à l'open NY AM
 - **Prix par point** : 1.0 pour NQ/MNQ/ES
-- **Swing left/right bars** : sensibilité de détection (défaut **3/3** depuis v1.13)
+- **Méthode détection swing** (défaut `Bougies`) + paramètres associés :
+  - Mode `Bougies` : **Swing left/right bars** (défaut **3/3** depuis v1.13)
+  - Mode `Durée` : **Durée avant/après** en minutes (défaut **15/15**, nouveau v1.14)
 - **Fenêtre horaire** : début/fin (défaut 7h–22h) + **Timezone** (mêmes options que Midnight NY, défaut Paris)
 - **Largeur marque** (défaut 2 bars), **épaisseur trait, couleurs bull/bear**
 
@@ -309,6 +313,14 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 ---
 
 ## Changelog
+
+### v1.14 - 2026-05-20
+
+- **Greffon — détection swing en mode "Durée"** : nouveau paramètre `Méthode détection swing` avec deux modes au choix :
+  - `Bougies` (défaut) : pivot défini par N bougies à gauche / droite (paramètres `Swing left/right bars`, défaut 3/3) — comportement v1.13 inchangé.
+  - `Durée` : pivot défini par une **durée en minutes** à gauche / droite (paramètres `Durée avant/après`, défaut 15/15) — **indépendant de la TF du chart**.
+- Le mode `Durée` est utile sur les charts **sub-minute** (S30, S15, S1) où le greffon retombe sur la TF du chart au lieu de M1. La durée garantit un critère temporel cohérent peu importe la granularité (15 min = 15 bars M1 = 30 bars S30 = 60 bars S15).
+- Tous les modes de tracking (continuations Amp2, reversals Amp1, ré-évaluation du path à 30 %) restent inchangés.
 
 ### v1.13 - 2026-05-20
 
