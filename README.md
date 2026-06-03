@@ -148,7 +148,7 @@ Sans cette option (défaut), la state machine tourne en continu : si elle était
 - **Auto NY** (défaut : décoché) — surcharge Amp1/Amp2 avec les Amp. Reco du dashboard
 - **Ajuster les amplitudes avant NY AM** + **Coef pre-NY AM** (défauts : décoché / 0.5)
 - **Prix par point** (défaut : 1.0 pour NQ/MNQ/ES)
-- **Méthode détection swing** (défaut : `Bougies`) — choix entre :
+- **Méthode détection swing** (défaut : `Durée` depuis v1.15) — choix entre :
   - `Bougies` : pivot défini par **Swing left/right bars** (défaut 3/3, pivot strict sur 7 bougies M1)
   - `Durée` : pivot défini par **Durée avant/après** en minutes (défaut 15/15) — indépendant de la TF du chart, utile sur les charts sub-minute
 - **Fenêtre horaire + Timezone** (défaut : 7h–22h Paris)
@@ -287,7 +287,7 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 - **Ajuster les amplitudes avant NY AM** (défaut **coché** depuis v1.12) + **Coef pre-NY AM** (défaut 0.5)
 - **Restart recherche Amp1 à chaque session** (défaut décoché) — relance une recherche fraîche au début de la fenêtre et à l'open NY AM
 - **Prix par point** : 1.0 pour NQ/MNQ/ES
-- **Méthode détection swing** (défaut `Bougies`) + paramètres associés :
+- **Méthode détection swing** (défaut **`Durée`** depuis v1.15) + paramètres associés :
   - Mode `Bougies` : **Swing left/right bars** (défaut **3/3** depuis v1.13)
   - Mode `Durée` : **Durée avant/après** en minutes (défaut **15/15**, nouveau v1.14)
 - **Fenêtre horaire** : début/fin (défaut 7h–22h) + **Timezone** (mêmes options que Midnight NY, défaut Paris)
@@ -313,6 +313,11 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 ---
 
 ## Changelog
+
+### v1.15 - 2026-05-20
+
+- **Greffon — fix des marques "flottantes"** : une marque n'est plus dessinée que si `triggerPrice` est dans `[low, high]` de la bougie courante. Cela résout les cas où la state machine "rattrape" un seuil déjà franchi (typiquement au démarrage de la fenêtre ou sur un gap d'ouverture). La state machine continue d'avancer normalement, seul le **dessin** est filtré. Port du correctif équivalent côté Tradovate (`maybePushMarker`).
+- **Greffon — défaut "Méthode détection swing"** : passe de `Bougies` à **`Durée`**. Le critère temporel reste pertinent quelle que soit la TF du chart (M1, S30, S15, etc.).
 
 ### v1.14 - 2026-05-20
 

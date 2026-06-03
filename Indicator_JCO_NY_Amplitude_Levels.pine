@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 1.14
+// Version: 1.15
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -43,6 +43,16 @@
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v1.15 - 2026-05-20
+//     - Greffon : fix des marques "flottantes". Une marque n'est plus dessinee
+//       que si triggerPrice est dans [low, high] de la bougie courante. Resout
+//       le cas typique du demarrage de fenetre / gap d'ouverture, ou la state
+//       machine rattrape un seuil deja franchi : la state machine avance
+//       normalement, seul le dessin est filtre. Port du correctif Tradovate
+//       (maybePushMarker).
+//     - Greffon : la "Methode detection swing" passe a "Duree" par defaut
+//       (auparavant "Bougies"). Le critere temporel reste pertinent quelle
+//       que soit la TF du chart (M1, S30, S15, etc.).
 //   v1.14 - 2026-05-20
 //     - Greffon : nouveau parametre "Methode detection swing" avec deux modes
 //       au choix :
@@ -289,7 +299,7 @@ amp_auto_ny     = input.bool(true,  "Auto NY (utilise les Amp. Reco du dashboard
 amp1Pts         = input.float(100,  "Amp1 (1ere / reversal) - ignore si Auto NY", minval=1, group=grp_marks)
 amp2Pts         = input.float(60,   "Amp2 (continuation) - ignore si Auto NY",    minval=1, group=grp_marks)
 amp_pointSize   = input.float(1.0,  "Prix par point (NQ/MNQ/ES = 1)", minval=0.01, step=0.05, group=grp_marks)
-amp_swingMode   = input.string("Bougies", "Methode detection swing", options=["Bougies","Duree"], group=grp_marks)
+amp_swingMode   = input.string("Duree",   "Methode detection swing", options=["Bougies","Duree"], group=grp_marks)
 amp_leftBars    = input.int(3,      "Swing left bars - mode Bougies",  minval=1, maxval=20, group=grp_marks)
 amp_rightBars   = input.int(3,      "Swing right bars - mode Bougies", minval=1, maxval=20, group=grp_marks)
 amp_leftDurMin  = input.int(15,     "Duree avant (min) - mode Duree",  minval=1, maxval=120, group=grp_marks)
@@ -1255,7 +1265,7 @@ f_processAmpBar(float h, float l, int t) =>
         if amp_s.swingType == "low"
             float triggerPrice = amp_s.swingPrice + amp1Price
             if h >= triggerPrice
-                if inWindow
+                if inWindow and triggerPrice >= l and triggerPrice <= h
                     f_drawAmpMarker(triggerPrice, true, t)
                 amp_s.phase           := "tracking"
                 amp_s.direction       := "up"
@@ -1270,7 +1280,7 @@ f_processAmpBar(float h, float l, int t) =>
         else if amp_s.swingType == "high"
             float triggerPrice = amp_s.swingPrice - amp1Price
             if l <= triggerPrice
-                if inWindow
+                if inWindow and triggerPrice >= l and triggerPrice <= h
                     f_drawAmpMarker(triggerPrice, false, t)
                 amp_s.phase           := "tracking"
                 amp_s.direction       := "down"
@@ -1331,7 +1341,7 @@ f_processAmpBar(float h, float l, int t) =>
             float revTrigger = amp_s.direction == "up" ? amp_s.refExtreme - amp1Price : amp_s.refExtreme + amp1Price
             string newDirection = amp_s.direction == "up" ? "down" : "up"
             bool useBearColor = newDirection == "up"
-            if inWindow
+            if inWindow and revTrigger >= l and revTrigger <= h
                 f_drawAmpMarker(revTrigger, useBearColor, t)
             amp_s.direction       := newDirection
             amp_s.origin          := amp_s.refExtreme
@@ -1351,7 +1361,7 @@ f_processAmpBar(float h, float l, int t) =>
             if recovery >= ampPathPrice
                 float contTrigger = amp_s.direction == "up" ? amp_s.oppExtreme + ampPathPrice : amp_s.oppExtreme - ampPathPrice
                 bool useBearColor = amp_s.direction == "up"
-                if inWindow
+                if inWindow and contTrigger >= l and contTrigger <= h
                     f_drawAmpMarker(contTrigger, useBearColor, t)
                 amp_s.origin          := amp_s.oppExtreme
                 amp_s.activeAmpPts    := ampPathPts
