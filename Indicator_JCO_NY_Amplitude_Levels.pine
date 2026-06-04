@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 1.15
+// Version: 1.16
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -43,6 +43,14 @@
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v1.16 - 2026-05-21
+//     - Greffon : "Duree apres" peut maintenant valoir 0 (minval=0 au lieu
+//       de 1). Avec 0 minute a droite, le pivot peut etre la bougie courante
+//       elle-meme : pas d'attente de confirmation, le swing est detecte en
+//       temps reel et la marque Amp1 peut se declencher sur la meme bougie.
+//       Utile pour le scalping ou la reactivite prime. En contrepartie,
+//       les swings deviennent plus agressifs (chaque nouveau plus bas / plus
+//       haut local devient un swing).
 //   v1.15 - 2026-05-20
 //     - Greffon : fix des marques "flottantes". Une marque n'est plus dessinee
 //       que si triggerPrice est dans [low, high] de la bougie courante. Resout
@@ -303,7 +311,7 @@ amp_swingMode   = input.string("Duree",   "Methode detection swing", options=["B
 amp_leftBars    = input.int(3,      "Swing left bars - mode Bougies",  minval=1, maxval=20, group=grp_marks)
 amp_rightBars   = input.int(3,      "Swing right bars - mode Bougies", minval=1, maxval=20, group=grp_marks)
 amp_leftDurMin  = input.int(15,     "Duree avant (min) - mode Duree",  minval=1, maxval=120, group=grp_marks)
-amp_rightDurMin = input.int(15,     "Duree apres (min) - mode Duree",  minval=1, maxval=120, group=grp_marks)
+amp_rightDurMin = input.int(15,     "Duree apres (min) - mode Duree",  minval=0, maxval=120, group=grp_marks)
 amp_startHour   = input.int(7,      "Debut h",                        minval=0, maxval=23, group=grp_marks, inline="m_start")
 amp_startMinute = input.int(0,      "min",                            minval=0, maxval=59, group=grp_marks, inline="m_start")
 amp_endHour     = input.int(22,     "Fin   h",                        minval=0, maxval=24, group=grp_marks, inline="m_end")
@@ -1207,7 +1215,9 @@ f_processAmpBar(float h, float l, int t) =>
         for k = n - 1 to 0
             if pivotIdx == -1 and array.get(amp_hist_t, k) <= pivotMaxT
                 pivotIdx := k
-        if pivotIdx >= 1 and pivotIdx < n - 1
+        // Cas particulier rightDurMs == 0 : on autorise pivotIdx == n - 1
+        // (bougie courante = pivot, marque en temps reel).
+        if pivotIdx >= 1 and pivotIdx <= n - 1
             int pivotT      = array.get(amp_hist_t, pivotIdx)
             int leftLimitT  = pivotT - leftDurMs
             int rightLimitT = pivotT + rightDurMs
@@ -1219,11 +1229,12 @@ f_processAmpBar(float h, float l, int t) =>
                 leftStart := 0   // fenetre gauche depasse l'historique disponible
             // rightEnd = dernier bar dont time <= rightLimitT
             rightEnd := pivotIdx
-            for k = pivotIdx + 1 to n - 1
-                if array.get(amp_hist_t, k) <= rightLimitT
-                    rightEnd := k
+            if pivotIdx < n - 1
+                for k = pivotIdx + 1 to n - 1
+                    if array.get(amp_hist_t, k) <= rightLimitT
+                        rightEnd := k
         else
-            // Pivot non eligible (pas assez d'historique a gauche ou a droite).
+            // Pivot non eligible (pas assez d'historique a gauche).
             pivotIdx := -1
 
     if pivotIdx >= 0

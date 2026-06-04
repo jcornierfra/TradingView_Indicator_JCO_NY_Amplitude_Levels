@@ -150,7 +150,7 @@ Sans cette option (défaut), la state machine tourne en continu : si elle était
 - **Prix par point** (défaut : 1.0 pour NQ/MNQ/ES)
 - **Méthode détection swing** (défaut : `Durée` depuis v1.15) — choix entre :
   - `Bougies` : pivot défini par **Swing left/right bars** (défaut 3/3, pivot strict sur 7 bougies M1)
-  - `Durée` : pivot défini par **Durée avant/après** en minutes (défaut 15/15) — indépendant de la TF du chart, utile sur les charts sub-minute
+  - `Durée` : pivot défini par **Durée avant/après** en minutes (défaut 15/15, **Durée après peut valoir 0** depuis v1.16 pour détection temps réel) — indépendant de la TF du chart, utile sur les charts sub-minute
 - **Fenêtre horaire + Timezone** (défaut : 7h–22h Paris)
 - **Largeur marque** (défaut : 2 bars), **épaisseur trait**, **couleurs bull/bear** — personnalisation visuelle
 
@@ -289,7 +289,7 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 - **Prix par point** : 1.0 pour NQ/MNQ/ES
 - **Méthode détection swing** (défaut **`Durée`** depuis v1.15) + paramètres associés :
   - Mode `Bougies` : **Swing left/right bars** (défaut **3/3** depuis v1.13)
-  - Mode `Durée` : **Durée avant/après** en minutes (défaut **15/15**, nouveau v1.14)
+  - Mode `Durée` : **Durée avant/après** en minutes (défaut **15/15**, nouveau v1.14 ; **Durée après ∈ [0, 120]** depuis v1.16 — 0 = pivot temps réel sur la bougie courante)
 - **Fenêtre horaire** : début/fin (défaut 7h–22h) + **Timezone** (mêmes options que Midnight NY, défaut Paris)
 - **Largeur marque** (défaut 2 bars), **épaisseur trait, couleurs bull/bear**
 
@@ -313,6 +313,11 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 ---
 
 ## Changelog
+
+### v1.16 - 2026-05-21
+
+- **Greffon — `Durée après` peut valoir 0** (`minval` passe de 1 à 0). Avec 0 minute à droite, le pivot peut être la **bougie courante elle-même** : pas d'attente de confirmation, le swing est détecté en temps réel et la marque Amp1 peut se déclencher sur la même bougie. Pratique pour le scalping où la réactivité prime.
+- **Trade-off** : avec 0 à droite, les swings deviennent plus agressifs (chaque nouveau plus bas / plus haut local devient un swing). Si trop de re-marquages parasites, repasser à 1-3 min.
 
 ### v1.15 - 2026-05-20
 
