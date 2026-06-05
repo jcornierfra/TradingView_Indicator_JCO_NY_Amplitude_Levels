@@ -201,16 +201,18 @@ L'objectif est d'obtenir une amplitude recommandée **stable et raisonnable** po
 
 2. **Estimation NY pour aujourd'hui** : on prend la plus grande estimation statistique, soit **Amp. NY P90** (ratio P90 du jour × Amp. Pre-NY), correspondant au risque faible.
 
-3. **Moyenne lissée** :
+3. **Moyenne lissée** (diviseur ajusté en v1.18) :
 
    ```text
-   avg = (Amp. NY P90 + somme des N amplitudes NY récentes) / (N + 1)
+   avg = (Amp. NY P90 + somme des amplitudes NY chargées) / (nb_jours_chargés + 1)
    ```
+
+   Le diviseur utilise le nombre **réel** de jours présents dans l'historique (au plus N), pas N figé. Évite la sous-estimation en phase de warmup.
 
 4. **Deux Amp. Reco** avec deux coefficients différents :
 
    ```text
-   Amp. Reco Faible = round(coef_faible × avg)   # défaut 0.25
+   Amp. Reco Faible = round(coef_faible × avg)   # défaut 0.30
    Amp. Reco Fort   = round(coef_fort   × avg)   # défaut 0.20
    ```
 
@@ -313,6 +315,12 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 ---
 
 ## Changelog
+
+### v1.18 - 2026-06-05
+
+- **Dashboard / Amp. Reco — diviseur ajusté** : la moyenne lissée divisait par `N + 1` figé (paramètre `Nb jours pour la somme`), alors que la somme `sum_5d_ny` était calculée sur la taille **réelle** de l'historique. En phase de warmup ou si moins de N jours étaient disponibles, la moyenne était **sous-estimée**.
+- Le diviseur utilise maintenant `array.size(ny_amp_hist) + 1` (le `+1` correspond à l'amplitude NY estimée P90 du jour, ajoutée au numérateur).
+- Sur historique plein (`hist_size == N`) le résultat est **inchangé** — le fix vise la cohérence avec la version Tradovate de l'indicateur (commit `3e9f539`, v2.3.0), qui tourne souvent avec moins de jours chargés.
 
 ### v1.17 - 2026-06-05
 

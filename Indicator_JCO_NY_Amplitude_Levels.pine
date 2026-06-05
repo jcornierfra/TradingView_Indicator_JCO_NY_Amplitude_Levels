@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 1.17
+// Version: 1.18
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -43,6 +43,13 @@
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v1.18 - 2026-06-05
+//     - Dashboard / Amp. Reco : le diviseur de la moyenne lissee utilise
+//       maintenant la taille reelle de l'historique NY (array.size(ny_amp_hist)
+//       + 1) au lieu de N+1 fige. Evite la sous-estimation en phase warmup ou
+//       si moins de N jours sont disponibles. Coherent avec la version
+//       Tradovate de l'indicateur (commit 3e9f539, v2.3.0). Sur historique
+//       plein (hist_size == N) le resultat est inchange.
 //   v1.17 - 2026-06-05
 //     - Greffon : fix Phase 1 searching en tendance forte. Auparavant la
 //       variable swing unique (swingPrice + swingType) etait ecrasee a chaque
@@ -961,14 +968,16 @@ if show_mid and not na(mid_open)
 p50r = array.from(0.65, 0.77, 0.78, 0.78, 0.70)  // 50% des jours depassent
 p75r = array.from(0.92, 1.02, 1.22, 1.03, 0.90)  // 25% des jours depassent
 p90r = array.from(1.27, 1.26, 1.79, 1.33, 1.42)  // 10% des jours depassent
-// Amplitude recommandee : methode (v1.9)
+// Amplitude recommandee : methode (v1.9, diviseur ajuste v1.18)
 // La moyenne est calculee UNE SEULE FOIS avec l'amplitude NY estimee P90 (la plus grande) :
-//   avg = (Amp.NY P90 + somme amplitudes NY des N jours precedents) / (N + 1)
+//   avg = (Amp.NY P90 + somme amplitudes NY recentes) / (nb_jours_reellement_charges + 1)
+// Le diviseur utilise la taille reelle de l'historique (array.size(ny_amp_hist)) au
+// lieu de N figé : evite de sous-estimer la moyenne en phase de warmup ou si moins
+// de N jours sont disponibles. Coherent avec la version Tradovate.
 // Puis deux coefficients differents donnent les deux Amp. Reco :
-//   reco_faible = round(coef_faible * avg)    [0.25 par defaut]
+//   reco_faible = round(coef_faible * avg)    [0.30 par defaut]
 //   reco_fort   = round(coef_fort   * avg)    [0.20 par defaut]
 // N et les deux coefficients sont configurables.
-reco_div = reco_n_days + 1
 
 // Somme et moyenne simple des N dernieres amplitudes NY (15h30-22h Paris)
 sum_5d_ny  = 0.0
@@ -990,7 +999,8 @@ amp_ny_faible = ratio_faible * use_amp   // amplitude NY estimee maxi - percenti
 amp_ny_fort   = ratio_fort   * use_amp   // amplitude NY estimee mini - percentile P50
 
 // Moyenne unique basee sur l'estimation la plus grande (P90)
-avg_reco = (amp_ny_faible + sum_5d_ny) / reco_div
+// Diviseur = nombre de jours NY reellement charges + 1 (le "+1" = amp_ny_faible).
+avg_reco = (amp_ny_faible + sum_5d_ny) / (hist_size + 1)
 
 amp_reco_faible = math.round(reco_coef_faible * avg_reco)
 amp_reco_fort   = math.round(reco_coef_fort   * avg_reco)
