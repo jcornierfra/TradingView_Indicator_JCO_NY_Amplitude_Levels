@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 1.16
+// Version: 1.17
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -43,6 +43,23 @@
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v1.17 - 2026-06-05
+//     - Greffon : fix Phase 1 searching en tendance forte. Auparavant la
+//       variable swing unique (swingPrice + swingType) etait ecrasee a chaque
+//       nouveau pivot, et en mode Duree avec rightDurMin=0, chaque nouveau
+//       plus bas/haut local devenait un swing. En tendance forte qui ne
+//       produit que des swing low successifs, le swingType restait fige a
+//       "low" et le trigger baissier n'etait jamais arme : si un reset de
+//       session tombait pendant la tendance (open NY AM, debut fenetre,
+//       minuit), la state machine restait coincee en searching jusqu'a la
+//       fin de la tendance.
+//     - Le type AmpState stocke maintenant swingLow et swingHigh
+//       independamment. Phase 1 searching arme les deux directions en
+//       parallele (bullTrigger = swingLow + Amp1, bearTrigger = swingHigh
+//       - Amp1) : quel que soit l'ecrasement repete d'un cote, l'autre
+//       reste memorise et un trigger Amp1 peut toujours se declencher.
+//     - Le tracking (continuations Amp2, reversals Amp1, re-evaluation du
+//       path a 30%) est strictement inchange.
 //   v1.16 - 2026-05-21
 //     - Greffon : "Duree apres" peut maintenant valoir 0 (minval=0 au lieu
 //       de 1). Avec 0 minute a droite, le pivot peut etre la bougie courante
@@ -1088,9 +1105,10 @@ type AmpState
     float  recoveryExt
     bool   retracementSeen
     string currentPath     // "amp1" | "amp2"
-    float  swingPrice
-    int    swingTime
-    string swingType       // "low" | "high"
+    float  swingLow        // dernier swing low detecte - ref. trigger haussier
+    int    swingLowTime
+    float  swingHigh       // dernier swing high detecte - ref. trigger baissier
+    int    swingHighTime
     int    lastDayKey
     bool   prevInWindow    // pour detecter la transition d'entree dans la fenetre
     bool   prevInNyAm      // pour detecter le passage de l'open NY AM
@@ -1106,9 +1124,10 @@ var AmpState amp_s = AmpState.new(
      recoveryExt     = na,
      retracementSeen = false,
      currentPath     = "amp2",
-     swingPrice      = na,
-     swingTime       = na,
-     swingType       = na,
+     swingLow        = na,
+     swingLowTime    = na,
+     swingHigh       = na,
+     swingHighTime   = na,
      lastDayKey      = 0,
      prevInWindow    = false,
      prevInNyAm      = false)
@@ -1140,8 +1159,8 @@ f_processAmpBar(float h, float l, int t) =>
         array.shift(amp_hist_t)
 
     // 2) Reset journalier (minuit dans la timezone choisie)
-    // On garde swingPrice / swingTime / swingType : le dernier swing detecte reste
-    // disponible comme reference pour le 1er trigger Amp1 du nouveau jour.
+    // On garde swingLow / swingHigh : les derniers swings detectes restent
+    // disponibles comme reference pour le 1er trigger Amp1 du nouveau jour.
     int dk = year(t, amp_tz_id) * 10000 + month(t, amp_tz_id) * 100 + dayofmonth(t, amp_tz_id)
     if amp_s.lastDayKey != 0 and dk != amp_s.lastDayKey
         amp_s.phase           := "searching"
@@ -1249,16 +1268,18 @@ f_processAmpBar(float h, float l, int t) =>
                 if array.get(amp_hist_h, k) >= pivotHigh
                     isSwingHigh := false
         int pivotTime = array.get(amp_hist_t, pivotIdx)
+        // Mise a jour INDEPENDANTE des deux swings : meme si la tendance ne
+        // produit que des swing low successifs (cas mode Duree + rightDurMin=0
+        // en tendance forte), le swing high precedent reste memorise et le
+        // trigger baissier reste arme apres un reset de session.
         if isSwingLow
-            if na(amp_s.swingTime) or amp_s.swingTime != pivotTime or amp_s.swingType != "low"
-                amp_s.swingPrice := pivotLow
-                amp_s.swingTime  := pivotTime
-                amp_s.swingType  := "low"
-        else if isSwingHigh
-            if na(amp_s.swingTime) or amp_s.swingTime != pivotTime or amp_s.swingType != "high"
-                amp_s.swingPrice := pivotHigh
-                amp_s.swingTime  := pivotTime
-                amp_s.swingType  := "high"
+            if na(amp_s.swingLowTime) or amp_s.swingLowTime != pivotTime
+                amp_s.swingLow     := pivotLow
+                amp_s.swingLowTime := pivotTime
+        if isSwingHigh
+            if na(amp_s.swingHighTime) or amp_s.swingHighTime != pivotTime
+                amp_s.swingHigh     := pivotHigh
+                amp_s.swingHighTime := pivotTime
 
     // 5) Ajustement pre-NY AM : si actif et avant l'heure NY AM (Paris, ref. indicateur),
     // on applique le coef aux deux amplitudes Amp1 / Amp2.
@@ -1272,37 +1293,49 @@ f_processAmpBar(float h, float l, int t) =>
     float amp2Price = amp2Pts_now * amp_pointSize
 
     // -------- Phase 1 : searching --------
-    if amp_s.phase == "searching" and not na(amp_s.swingPrice)
-        if amp_s.swingType == "low"
-            float triggerPrice = amp_s.swingPrice + amp1Price
-            if h >= triggerPrice
-                if inWindow and triggerPrice >= l and triggerPrice <= h
-                    f_drawAmpMarker(triggerPrice, true, t)
-                amp_s.phase           := "tracking"
-                amp_s.direction       := "up"
-                amp_s.origin          := amp_s.swingPrice
-                amp_s.activeAmpPts    := amp1Pts_now
-                amp_s.refExtreme      := triggerPrice
-                amp_s.oppExtreme      := triggerPrice
-                amp_s.localOpp        := triggerPrice
-                amp_s.recoveryExt     := triggerPrice
-                amp_s.retracementSeen := false
-                amp_s.currentPath     := "amp2"
-        else if amp_s.swingType == "high"
-            float triggerPrice = amp_s.swingPrice - amp1Price
-            if l <= triggerPrice
-                if inWindow and triggerPrice >= l and triggerPrice <= h
-                    f_drawAmpMarker(triggerPrice, false, t)
-                amp_s.phase           := "tracking"
-                amp_s.direction       := "down"
-                amp_s.origin          := amp_s.swingPrice
-                amp_s.activeAmpPts    := amp1Pts_now
-                amp_s.refExtreme      := triggerPrice
-                amp_s.oppExtreme      := triggerPrice
-                amp_s.localOpp        := triggerPrice
-                amp_s.recoveryExt     := triggerPrice
-                amp_s.retracementSeen := false
-                amp_s.currentPath     := "amp2"
+    // Les deux directions sont armees en parallele : meme si une tendance
+    // forte ecrase sans cesse swingLow, le swingHigh d'avant la tendance
+    // reste memorise, donc bearTrigger reste arme.
+    if amp_s.phase == "searching"
+        bool bullTriggered = false
+        float bullTrigger  = na
+        if not na(amp_s.swingLow)
+            bullTrigger := amp_s.swingLow + amp1Price
+            if h >= bullTrigger
+                bullTriggered := true
+        bool bearTriggered = false
+        float bearTrigger  = na
+        if not na(amp_s.swingHigh)
+            bearTrigger := amp_s.swingHigh - amp1Price
+            if l <= bearTrigger
+                bearTriggered := true
+
+        if bullTriggered
+            if inWindow and bullTrigger >= l and bullTrigger <= h
+                f_drawAmpMarker(bullTrigger, true, t)
+            amp_s.phase           := "tracking"
+            amp_s.direction       := "up"
+            amp_s.origin          := amp_s.swingLow
+            amp_s.activeAmpPts    := amp1Pts_now
+            amp_s.refExtreme      := bullTrigger
+            amp_s.oppExtreme      := bullTrigger
+            amp_s.localOpp        := bullTrigger
+            amp_s.recoveryExt     := bullTrigger
+            amp_s.retracementSeen := false
+            amp_s.currentPath     := "amp2"
+        else if bearTriggered
+            if inWindow and bearTrigger >= l and bearTrigger <= h
+                f_drawAmpMarker(bearTrigger, false, t)
+            amp_s.phase           := "tracking"
+            amp_s.direction       := "down"
+            amp_s.origin          := amp_s.swingHigh
+            amp_s.activeAmpPts    := amp1Pts_now
+            amp_s.refExtreme      := bearTrigger
+            amp_s.oppExtreme      := bearTrigger
+            amp_s.localOpp        := bearTrigger
+            amp_s.recoveryExt     := bearTrigger
+            amp_s.retracementSeen := false
+            amp_s.currentPath     := "amp2"
     // -------- Phase 2 : tracking --------
     else if amp_s.phase == "tracking"
         // 1) Mise a jour des extremes

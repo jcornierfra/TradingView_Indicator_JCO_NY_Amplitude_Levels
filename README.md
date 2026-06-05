@@ -314,6 +314,15 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 
 ## Changelog
 
+### v1.17 - 2026-06-05
+
+- **Greffon — fix Phase 1 searching en tendance forte** : la variable swing unique (`swingPrice` + `swingType`) était écrasée à chaque nouveau pivot détecté. En mode `Durée` avec `Durée après = 0`, chaque nouveau plus bas / plus haut local devenait un swing. En tendance baissière forte qui ne produit que des swing low successifs, `swingType` restait figé à `"low"` et le **bear trigger n'était jamais armé**. Si un reset de session (open NY AM, début fenêtre, minuit) tombait pendant la tendance, la state machine restait coincée en searching jusqu'à la fin de la tendance.
+- **Fix** : le type `AmpState` stocke maintenant `swingLow` et `swingHigh` **indépendamment**. Phase 1 searching arme les **deux directions en parallèle** :
+  - `bullTrigger = swingLow + Amp1` (signal achat / marque rouge)
+  - `bearTrigger = swingHigh - Amp1` (signal vente / marque verte)
+- Quel que soit l'écrasement répété d'un côté, l'autre côté reste mémorisé et un trigger Amp1 peut toujours se déclencher.
+- Le tracking (continuations Amp2, reversals Amp1, ré-évaluation du path à 30 %) est **strictement inchangé**.
+
 ### v1.16 - 2026-05-21
 
 - **Greffon — `Durée après` peut valoir 0** (`minval` passe de 1 à 0). Avec 0 minute à droite, le pivot peut être la **bougie courante elle-même** : pas d'attente de confirmation, le swing est détecté en temps réel et la marque Amp1 peut se déclencher sur la même bougie. Pratique pour le scalping où la réactivité prime.
