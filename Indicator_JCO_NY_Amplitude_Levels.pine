@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 1.19
+// Version: 1.19.1
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -38,6 +38,29 @@
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v1.19.1 - 2026-06-12
+//     - Revue de code post-v1.19. Fixes :
+//       * Dashboard row 3 "Amp. NY" : label renomme en "Amp. NY min/max" et
+//         couleurs inversees - P50 mini en rouge (plus risque), P90 maxi en
+//         vert (moins risque). La convention col 1=Long / col 2=Short ne
+//         s'applique pas a cette ligne, qui code le niveau de risque.
+//       * Centralisation de amp_tz_id juste apres f_tz() (au lieu d'etre
+//         declaree en milieu de fichier). Disponible pour le dashboard, le
+//         live preview et f_processEffBar qui en ont besoin en amont.
+//       * Filtre Efficience : les 3 hardcodes "Europe/Paris" (dashboard,
+//         live preview, f_processEffBar) passent en amp_tz_id. Greffon :
+//         le hardcode "Europe/Paris" dans f_processAmpBar (utilise pour
+//         inNyAm) passe aussi en amp_tz_id. Tous les timings du filtre eff
+//         et de l'ajustement pre-NY AM s'alignent maintenant sur la timezone
+//         choisie dans "Marques d'amplitude > Timezone fenetre".
+//       * Live preview gate avec "localMins >= ny_am_mins" pour eviter de
+//         recalculer eff_s.current avec un o0 perime au tournant de minuit
+//         sur instruments 24/7 (fenetre minuit -> ouverture NY).
+//       * Nettoyage : suppression du champ UDT AmpState.activeAmpPts qui
+//         etait ecrit en 4 endroits mais jamais lu. Suppression des
+//         variables locales revAmp1Pts / dirAmp1Pts / dirAmp2Pts /
+//         ampPathPts devenues dead suite a la suppression du champ.
+//       * Commentaire dashboard mis a jour : "9 lignes" au lieu de "7 lignes".
 //   v1.19 - 2026-06-12
 //     - Greffon / Amplitudes : dissociation Long / Short. Les 2 inputs Amp1
 //       et Amp2 sont remplaces par 4 inputs - A1L (Long Amp1, defaut 120),
@@ -487,6 +510,11 @@ f_tz(tz) =>
         "Hong Kong"   => "Asia/Hong_Kong"
         "Sydney"      => "Australia/Sydney"
         => "UTC"
+
+// Timezone IANA pour la fenetre horaire du greffon et tout le filtre Efficience NY.
+// Centralisee ici car utilisee dans le dashboard, le live preview et f_processEffBar
+// (tous trois en amont de la section greffon ou amp_tz_id etait redefini avant v1.19).
+amp_tz_id = f_tz(amp_tz)
 
 // ── Variables persistantes ────────────────────────────────────────────────────
 var float preny_high      = na
@@ -1109,20 +1137,23 @@ if amp_auto_ny
 //     committe. Le path n'est PAS modifie : la prochaine M1 batch le mettra a
 //     jour proprement.
 if eff_enabled and barstate.isrealtime
-    int eff_live_paris_mins = hour(time, "Europe/Paris") * 60 + minute(time, "Europe/Paris")
+    int eff_live_local_mins = hour(time, amp_tz_id) * 60 + minute(time, amp_tz_id)
     int eff_live_ny_am_mins = ny_hour * 60 + ny_min
-    int eff_live_prev_mins  = na(time[1]) ? 0 : hour(time[1], "Europe/Paris") * 60 + minute(time[1], "Europe/Paris")
+    int eff_live_prev_mins  = na(time[1]) ? 0 : hour(time[1], amp_tz_id) * 60 + minute(time[1], amp_tz_id)
 
     // Fallback anchor sur la barre de transition 15h30
-    if not eff_s.anchored and eff_live_prev_mins < eff_live_ny_am_mins and eff_live_paris_mins >= eff_live_ny_am_mins
+    if not eff_s.anchored and eff_live_prev_mins < eff_live_ny_am_mins and eff_live_local_mins >= eff_live_ny_am_mins
         eff_s.o0       := open
         eff_s.prevC    := open
         eff_s.path     := 0.0
         eff_s.current  := 0.0
         eff_s.anchored := true
 
-    // Live preview de eff_s.current avec le close courant du chart
-    if eff_s.anchored and not na(eff_s.prevC) and not na(eff_s.o0)
+    // Live preview de eff_s.current avec le close courant du chart.
+    // Gate sur "apres NY AM" pour eviter de recalculer current avec un o0 perime
+    // pendant la fenetre entre minuit (reset journalier dans la M1 batch) et
+    // l'ouverture NY (~1 barre de chart sur instrument 24/7).
+    if eff_s.anchored and not na(eff_s.prevC) and not na(eff_s.o0) and eff_live_local_mins >= eff_live_ny_am_mins
         float eff_live_preview_path = eff_s.path + math.abs(close - eff_s.prevC)
         eff_s.current := eff_live_preview_path > 0 ? math.abs(close - eff_s.o0) / eff_live_preview_path : 0.0
 
@@ -1131,7 +1162,7 @@ if barstate.islast and show_dash
     dir_col = is_down ? color.new(#ff7b72, 0) : color.new(#3fb950, 0)
     amp_str = str.tostring(math.round(use_amp, 1)) + " pts"
 
-    // ===== Dashboard : 3 colonnes (label | Long | Short) sur 7 lignes =====
+    // ===== Dashboard : 3 colonnes (label | Long | Short) sur 9 lignes =====
     frz_str_s = frozen ? "Fige" : "Dynamique"
     frz_col_s = frozen ? color.new(#3fb950, 0) : color.new(#c99a2c, 0)
 
@@ -1149,8 +1180,8 @@ if barstate.islast and show_dash
     // eff_s.solder_done : le dashboard est rendu PLUS HAUT dans le script que
     // la boucle des M1 (qui met a jour eff_s). Resultat : nogo se fige des que
     // la barre du chart franchit 15h45 Paris, sans attendre le tour suivant.
-    int  eff_dash_h    = hour(time, "Europe/Paris")
-    int  eff_dash_m    = minute(time, "Europe/Paris")
+    int  eff_dash_h    = hour(time, amp_tz_id)
+    int  eff_dash_m    = minute(time, amp_tz_id)
     int  eff_dash_mins = eff_dash_h * 60 + eff_dash_m
     bool eff_nogo_gate_past   = eff_dash_mins >= eff_nogo_h   * 60 + eff_nogo_min
     bool eff_solder_gate_past = eff_dash_mins >= eff_solder_h * 60 + eff_solder_min
@@ -1182,10 +1213,11 @@ if barstate.islast and show_dash
     table.cell(ts, 1, 2, str.tostring(math.round(mean_5d_ny)) + " pts",  text_color=color.gray, text_size=size.small)
     table.cell(ts, 2, 2, "",                                              text_size=size.small)
 
-    // Row 3 : Amp. NY P50 / P90 (label + 2 valeurs)
-    table.cell(ts, 0, 3, "Amp. NY",                                          text_color=color.gray,            text_size=size.small)
-    table.cell(ts, 1, 3, str.tostring(math.round(amp_ny_fort))   + " pts",   text_color=color.new(#3fb950, 0), text_size=size.small)
-    table.cell(ts, 2, 3, str.tostring(math.round(amp_ny_faible)) + " pts",   text_color=color.new(#ff7b72, 0), text_size=size.small)
+    // Row 3 : Amp. NY min/max (P50 mini = rouge "plus risque" ; P90 maxi = vert "moins risque")
+    // Convention specifique a cette ligne : la petite valeur est plus risquee, donc rouge.
+    table.cell(ts, 0, 3, "Amp. NY min/max",                                  text_color=color.gray,            text_size=size.small)
+    table.cell(ts, 1, 3, str.tostring(math.round(amp_ny_fort))   + " pts",   text_color=color.new(#ff7b72, 0), text_size=size.small)
+    table.cell(ts, 2, 3, str.tostring(math.round(amp_ny_faible)) + " pts",   text_color=color.new(#3fb950, 0), text_size=size.small)
 
     // Row 4 : header "Long" / "Short"
     table.cell(ts, 0, 4, "Amp. Reco", text_color=color.gray,            text_size=size.small)
@@ -1218,15 +1250,14 @@ if barstate.islast and show_dash
 // Detection swing M1 + machine d'etats deux phases (searching/tracking)
 // Force la TF M1 via request.security_lower_tf() quelle que soit la TF du chart
 // ═══════════════════════════════════════════════════════════════════════════
-
-// Timezone IANA pour la fenetre horaire du greffon (DST gere automatiquement)
-amp_tz_id = f_tz(amp_tz)
+// Note : amp_tz_id est defini plus haut (apres f_tz()), avant le dashboard
+// et le live preview qui en dependent. Voir le commentaire pres de sa
+// definition pour le rationale.
 
 // === Type Etat ===
 type AmpState
     string phase           // "searching" | "tracking"
     string direction       // "up" (marque rouge) | "down" (marque verte)
-    float  activeAmpPts
     float  origin
     float  refExtreme
     float  oppExtreme
@@ -1245,7 +1276,6 @@ type AmpState
 var AmpState amp_s = AmpState.new(
      phase           = "searching",
      direction       = na,
-     activeAmpPts    = na,
      origin          = na,
      refExtreme      = na,
      oppExtreme      = na,
@@ -1295,14 +1325,14 @@ f_processEffBar(float o, float c, int t) =>
         eff_s.solder_done  := false
     eff_s.dayKey := dk
 
-    // 2) Horaires en minutes Paris
-    int parisMinsLocal = hour(t, "Europe/Paris") * 60 + minute(t, "Europe/Paris")
+    // 2) Horaires en minutes dans la timezone amp_tz_id (Paris par defaut)
+    int localMinsTz    = hour(t, amp_tz_id) * 60 + minute(t, amp_tz_id)
     int nyAmMinsLocal  = ny_hour       * 60 + ny_min
     int nogoMins       = eff_nogo_h    * 60 + eff_nogo_min
     int solderMins     = eff_solder_h  * 60 + eff_solder_min
 
-    // 3) Ancrage a la 1ere M1 dont parisMins >= nyAmMins
-    if not eff_s.anchored and parisMinsLocal >= nyAmMinsLocal
+    // 3) Ancrage a la 1ere M1 dont localMinsTz >= nyAmMins
+    if not eff_s.anchored and localMinsTz >= nyAmMinsLocal
         eff_s.o0       := o
         eff_s.prevC    := o
         eff_s.path     := 0.0
@@ -1316,11 +1346,11 @@ f_processEffBar(float o, float c, int t) =>
         eff_s.current := eff_s.path > 0 ? math.abs(c - eff_s.o0) / eff_s.path : 0.0
 
     // 5) Gel des valeurs aux deux gates horaires
-    if eff_s.anchored and not eff_s.nogo_done and parisMinsLocal >= nogoMins
+    if eff_s.anchored and not eff_s.nogo_done and localMinsTz >= nogoMins
         eff_s.nogo_value := eff_s.current
         eff_s.nogo_done  := true
 
-    if eff_s.anchored and not eff_s.solder_done and parisMinsLocal >= solderMins
+    if eff_s.anchored and not eff_s.solder_done and localMinsTz >= solderMins
         eff_s.solder_value := eff_s.current
         eff_s.solder_done  := true
 
@@ -1342,7 +1372,6 @@ f_processAmpBar(float h, float l, int t) =>
     if amp_s.lastDayKey != 0 and dk != amp_s.lastDayKey
         amp_s.phase           := "searching"
         amp_s.direction       := na
-        amp_s.activeAmpPts    := na
         amp_s.origin          := na
         amp_s.refExtreme      := na
         amp_s.oppExtreme      := na
@@ -1358,9 +1387,9 @@ f_processAmpBar(float h, float l, int t) =>
     int endMins    = amp_endHour   * 60 + amp_endMinute
     bool inWindow  = minutesNow >= startMins and minutesNow < endMins
 
-    int  parisMins = hour(t, "Europe/Paris") * 60 + minute(t, "Europe/Paris")
+    int  localMins = hour(t, amp_tz_id) * 60 + minute(t, amp_tz_id)
     int  nyAmMins  = ny_hour * 60 + ny_min
-    bool inNyAm    = parisMins >= nyAmMins
+    bool inNyAm    = localMins >= nyAmMins
 
     // 3b) Reset session optionnel : si la case est cochee, on relance une
     // recherche Amp1 fraiche a chaque ouverture de session (debut fenetre + NY AM).
@@ -1372,7 +1401,6 @@ f_processAmpBar(float h, float l, int t) =>
         if windowOpening or nyAmOpening
             amp_s.phase           := "searching"
             amp_s.direction       := na
-            amp_s.activeAmpPts    := na
             amp_s.origin          := na
             amp_s.refExtreme      := na
             amp_s.oppExtreme      := na
@@ -1500,7 +1528,6 @@ f_processAmpBar(float h, float l, int t) =>
             amp_s.phase           := "tracking"
             amp_s.direction       := "up"
             amp_s.origin          := amp_s.swingLow
-            amp_s.activeAmpPts    := amp1S_now
             amp_s.refExtreme      := bullTrigger
             amp_s.oppExtreme      := bullTrigger
             amp_s.localOpp        := bullTrigger
@@ -1513,7 +1540,6 @@ f_processAmpBar(float h, float l, int t) =>
             amp_s.phase           := "tracking"
             amp_s.direction       := "down"
             amp_s.origin          := amp_s.swingHigh
-            amp_s.activeAmpPts    := amp1L_now
             amp_s.refExtreme      := bearTrigger
             amp_s.oppExtreme      := bearTrigger
             amp_s.localOpp        := bearTrigger
@@ -1568,7 +1594,6 @@ f_processAmpBar(float h, float l, int t) =>
         //   - direction "up" en cours  -> reversal sera "down" (long)  -> seuil A1L
         //   - direction "down" en cours -> reversal sera "up"   (short) -> seuil A1S
         float revAmp1Price = amp_s.direction == "up" ? amp1L_Price : amp1S_Price
-        float revAmp1Pts   = amp_s.direction == "up" ? amp1L_now   : amp1S_now
         if amp_s.retracementSeen and localRetrace >= revAmp1Price
             float revTrigger = amp_s.direction == "up" ? amp_s.refExtreme - revAmp1Price : amp_s.refExtreme + revAmp1Price
             string newDirection = amp_s.direction == "up" ? "down" : "up"
@@ -1577,7 +1602,6 @@ f_processAmpBar(float h, float l, int t) =>
                 f_drawAmpMarker(revTrigger, useBearColor, t)
             amp_s.direction       := newDirection
             amp_s.origin          := amp_s.refExtreme
-            amp_s.activeAmpPts    := revAmp1Pts
             amp_s.refExtreme      := revTrigger
             amp_s.oppExtreme      := revTrigger
             amp_s.localOpp        := revTrigger
@@ -1592,17 +1616,13 @@ f_processAmpBar(float h, float l, int t) =>
         if not markPlaced
             float dirAmp1Price = amp_s.direction == "up" ? amp1S_Price : amp1L_Price
             float dirAmp2Price = amp_s.direction == "up" ? amp2S_Price : amp2L_Price
-            float dirAmp1Pts   = amp_s.direction == "up" ? amp1S_now   : amp1L_now
-            float dirAmp2Pts   = amp_s.direction == "up" ? amp2S_now   : amp2L_now
             float ampPathPrice = amp_s.currentPath == "amp1" ? dirAmp1Price : dirAmp2Price
-            float ampPathPts   = amp_s.currentPath == "amp1" ? dirAmp1Pts   : dirAmp2Pts
             if recovery >= ampPathPrice
                 float contTrigger = amp_s.direction == "up" ? amp_s.oppExtreme + ampPathPrice : amp_s.oppExtreme - ampPathPrice
                 bool useBearColor = amp_s.direction == "up"
                 if inWindow and contTrigger >= l and contTrigger <= h
                     f_drawAmpMarker(contTrigger, useBearColor, t)
                 amp_s.origin          := amp_s.oppExtreme
-                amp_s.activeAmpPts    := ampPathPts
                 amp_s.refExtreme      := contTrigger
                 amp_s.oppExtreme      := contTrigger
                 amp_s.localOpp        := contTrigger

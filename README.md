@@ -335,6 +335,17 @@ Les 2 alertes (`Efficience NO-GO` et `Efficience SOLDER`) se configurent via le 
 
 ## Changelog
 
+### v1.19.1 - 2026-06-12
+
+Revue de code post-v1.19 — fixes de cohérence sans changement fonctionnel majeur :
+
+- **Dashboard row 3** : label renommé en `Amp. NY min/max` et couleurs inversées — P50 mini en **rouge** (plus risquée), P90 maxi en **vert** (moins risquée). La convention col 1=Long / col 2=Short ne s'applique pas à cette ligne, qui code le niveau de risque.
+- **Timezone unifiée** : tous les timings du filtre Efficience NY et de l'ajustement pré-NY AM du greffon s'alignent maintenant sur la timezone choisie dans `Marques d'amplitude > Timezone fenêtre`. Auparavant 4 endroits hardcodaient `Europe/Paris` indépendamment.
+- **`amp_tz_id` centralisé** juste après `f_tz()` (au lieu d'être redéclarée au milieu du fichier) — disponible pour le dashboard, le live preview et `f_processEffBar` qui en ont besoin en amont.
+- **Live preview** : gate ajoutée sur `localMins >= ny_am_mins` pour éviter de recalculer `eff_s.current` avec un `o0` périmé pendant la fenêtre minuit → ouverture NY sur instruments 24/7.
+- **Nettoyage** : suppression du champ UDT `AmpState.activeAmpPts` (écrit en 4 endroits, jamais lu) et des variables locales `revAmp1Pts` / `dirAmp1Pts` / `dirAmp2Pts` / `ampPathPts` devenues mortes.
+- **Commentaire** : "9 lignes" au lieu de "7 lignes" dans l'en-tête du dashboard.
+
 ### v1.19 - 2026-06-12
 
 - **Greffon — Dissociation Long / Short des amplitudes** : les 2 inputs `Amp1` et `Amp2` sont remplacés par **4 inputs** :
