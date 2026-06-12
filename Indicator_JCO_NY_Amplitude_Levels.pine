@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 1.18
+// Version: 1.19
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -22,12 +22,7 @@
 //                jours precedents (15h30-22h Paris), divise par (N+1). Deux coefficients
 //                differents donnent les 2 Amp. Reco affichees (risque faible / risque fort).
 //                N et les 2 coefficients sont configurables.
-//              - Dashboard 3 modes : Masquer / Complet / Simplifie
-//                - Complet : direction (UP/DOWN), jour de la semaine, etat fige/dynamique,
-//                  amplitude Pre-NY, amplitude moyenne sur N jours, amplitude NY estimee
-//                  et recommandee par niveau de risque (Faible P50 = amp mini en haut,
-//                  Fort P90 = amp maxi en bas) base sur stats NQ 2024-2026
-//                - Simplifie : 2 colonnes compactes
+//              - Dashboard compact 2 colonnes (toggle Afficher / Masquer) :
 //                  Col 0 : direction, "Amp. Pre-NY", "Amp. Moy. Nd", header "Amp. Reco",
 //                          2 valeurs reco (faible / fort)
 //                  Col 1 : etat Fige/Dynamique, valeur Pre-NY, valeur Moy. Nd,
@@ -43,6 +38,40 @@
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v1.19 - 2026-06-12
+//     - Greffon / Amplitudes : dissociation Long / Short. Les 2 inputs Amp1
+//       et Amp2 sont remplaces par 4 inputs - A1L (Long Amp1, defaut 120),
+//       A1S (Short Amp1, defaut 100), A2L (Long Amp2, defaut 127), A2S
+//       (Short Amp2, defaut 77). Cote Auto NY, les 2 coefficients passent
+//       a 4 : reco_coef_a1l (0.390), reco_coef_a1s (0.330), reco_coef_a2l
+//       (0.420), reco_coef_a2s (0.255), appliques directement a avg_reco.
+//       Convention : direction "up" (mouvement bull, marque rouge) =
+//       futur trade SHORT, utilise A1S / A2S. Direction "down" (mouvement
+//       bear, marque verte) = futur trade LONG, utilise A1L / A2L. Le
+//       reversal utilise A1 de la NOUVELLE direction (celle de la marque
+//       a venir), la continuation utilise A1 ou A2 de la direction en
+//       cours selon le path-driven a 30%.
+//     - Dashboard : passage a 3 colonnes (label | Long | Short) sur 9
+//       lignes. Suppression de l'ancien mode "Complet" (seul "Simplifie"
+//       subsiste). Affiche les 4 valeurs A1L / A1S / A2L / A2S sur 2 lignes.
+//     - Efficience NY (filtre Kaufman) : nouveau groupe d'inputs avec
+//       2 seuils (No-Go 15h45 Paris, Solder 16h15 Paris) et 2 horaires
+//       gate configurables. Calcul eff = |close - o0| / sum(|close -
+//       prevClose|) avec o0 = open de la 1ere M1 de la session NY, sur
+//       les M1 livrees par request.security_lower_tf. Reset journalier
+//       a minuit timezone amp_tz_id. 2 nouvelles lignes au dashboard
+//       (No-Go / Solder) avec valeur figee a l'heure gate, couleur rouge
+//       des que le seuil est franchi. 2 alertes alertcondition : "Efficience
+//       NO-GO" (15h45) et "Efficience SOLDER" (16h15), une seule emission
+//       par jour grace au tracking eff_prev_*_done.
+//     - Efficience NY : live preview sur les charts > M1. Sans cette
+//       section, le dashboard attendait la cloture de la 1ere barre du
+//       chart apres 15h30 pour afficher une valeur (5 min sur M5, 15
+//       min sur M15...). Fallback anchor sur la barre de transition 15h30
+//       avec l'open de la barre courante du chart, puis recalcul live
+//       de eff_s.current en ajoutant le close courant comme tick supple-
+//       mentaire au-dessus du path committe. La prochaine M1 batch ecrase
+//       proprement le path par-dessus.
 //   v1.18 - 2026-06-05
 //     - Dashboard / Amp. Reco : le diviseur de la moyenne lissee utilise
 //       maintenant la taille reelle de l'historique NY (array.size(ny_amp_hist)
@@ -210,13 +239,15 @@ ny_min   = input.int(30, "Minute debut NY AM",         minval=0, maxval=59, grou
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 grp_dash  = "Dashboard"
-dash_mode = input.string("Complet", "Mode d'affichage", options=["Masquer", "Complet", "Simplifie"], group=grp_dash)
+show_dash = input.bool(true, "Afficher le dashboard", group=grp_dash)
 
 // ── Calcul Amp. Reco ──────────────────────────────────────────────────────────
 grp_reco         = "Calcul Amp. Reco"
 reco_n_days      = input.int(5,    "Nb jours pour la somme",  minval=1, maxval=30, group=grp_reco)
-reco_coef_faible = input.float(0.30, "Coef. risque faible (0-1)", minval=0.01, maxval=1.0, step=0.01, group=grp_reco)
-reco_coef_fort   = input.float(0.20, "Coef. risque fort (0-1)",   minval=0.01, maxval=1.0, step=0.01, group=grp_reco)
+reco_coef_a1l    = input.float(0.390, "Coef A1L (Long Amp1)",  minval=0.01, maxval=1.0, step=0.005, group=grp_reco)
+reco_coef_a1s    = input.float(0.330, "Coef A1S (Short Amp1)", minval=0.01, maxval=1.0, step=0.005, group=grp_reco)
+reco_coef_a2l    = input.float(0.420, "Coef A2L (Long Amp2)",  minval=0.01, maxval=1.0, step=0.005, group=grp_reco)
+reco_coef_a2s    = input.float(0.255, "Coef A2S (Short Amp2)", minval=0.01, maxval=1.0, step=0.005, group=grp_reco)
 
 // ── Niveaux (toggle maitre pour toutes les lignes Fibo et Day) ───────────────
 grp_lvl     = "Niveaux (Fibo et Day lines)"
@@ -328,8 +359,10 @@ mid_minute  = input.int(0, "Minute (0-59)",  minval=0, maxval=59, group=grp_mid)
 grp_marks       = "Marques d'amplitude (greffon)"
 show_marks      = input.bool(true,  "Afficher les marques",                      group=grp_marks)
 amp_auto_ny     = input.bool(true,  "Auto NY (utilise les Amp. Reco du dashboard)", group=grp_marks)
-amp1Pts         = input.float(100,  "Amp1 (1ere / reversal) - ignore si Auto NY", minval=1, group=grp_marks)
-amp2Pts         = input.float(60,   "Amp2 (continuation) - ignore si Auto NY",    minval=1, group=grp_marks)
+amp1L_Pts       = input.float(120,  "A1L (Amp1 Long  - reversal long)  - ignore si Auto NY", minval=1, group=grp_marks)
+amp1S_Pts       = input.float(100,  "A1S (Amp1 Short - reversal short) - ignore si Auto NY", minval=1, group=grp_marks)
+amp2L_Pts       = input.float(127,  "A2L (Amp2 Long  - continuation long)  - ignore si Auto NY", minval=1, group=grp_marks)
+amp2S_Pts       = input.float(77,   "A2S (Amp2 Short - continuation short) - ignore si Auto NY", minval=1, group=grp_marks)
 amp_pointSize   = input.float(1.0,  "Prix par point (NQ/MNQ/ES = 1)", minval=0.01, step=0.05, group=grp_marks)
 amp_swingMode   = input.string("Duree",   "Methode detection swing", options=["Bougies","Duree"], group=grp_marks)
 amp_leftBars    = input.int(3,      "Swing left bars - mode Bougies",  minval=1, maxval=20, group=grp_marks)
@@ -351,9 +384,50 @@ amp_restartOnSessions = input.bool(false, "Restart recherche Amp1 a chaque sessi
 amp_bullColor   = input.color(color.new(#00C853, 10), "Couleur haussiere (signal achat)", group=grp_marks)
 amp_bearColor   = input.color(color.new(#FF1744, 10), "Couleur baissiere (signal vente)", group=grp_marks)
 
-// Effective amp1/amp2 values (overridden if Auto NY is enabled, apres dashboard reco)
-amp1Pts_eff = amp1Pts
-amp2Pts_eff = amp2Pts
+// ── Efficience NY (filtre Kaufman + alertes) ─────────────────────────────────
+grp_eff           = "Efficience NY"
+eff_enabled       = input.bool(true, "Activer le filtre d'efficience", group=grp_eff)
+eff_nogo_thr      = input.float(0.55, "Seuil No-Go (15h45 Paris)", minval=0.0, maxval=1.0, step=0.01, group=grp_eff)
+eff_solder_thr    = input.float(0.40, "Seuil Solder (16h15 Paris)", minval=0.0, maxval=1.0, step=0.01, group=grp_eff)
+eff_nogo_h        = input.int(15, "Heure No-Go", minval=0, maxval=23, group=grp_eff, inline="nogo")
+eff_nogo_min      = input.int(45, "Minute",     minval=0, maxval=59, group=grp_eff, inline="nogo")
+eff_solder_h      = input.int(16, "Heure Solder", minval=0, maxval=23, group=grp_eff, inline="solder")
+eff_solder_min    = input.int(15, "Minute",      minval=0, maxval=59, group=grp_eff, inline="solder")
+
+// === Etat efficience Kaufman - filtre NY ===
+// Ancrage a l'open de la 1ere M1 de la session NY = 15h30 Paris.
+// Reset journalier sur dk = minuit timezone amp_tz_id.
+// Encapsule dans un UDT : Pine v6 interdit a une fonction de modifier des
+// var globaux par :=, mais autorise la mutation de champs d'une instance UDT.
+type EffState
+    float o0            // open de la bougie d'ancrage 15h30
+    float prevC         // close de la M1 precedente
+    float path          // somme cumulee des delta close
+    float current       // efficience instantanee
+    float nogo_value    // valeur figee a l'heure no-go
+    float solder_value  // valeur figee a l'heure solder
+    bool  anchored      // true des qu'on a ancre o0 pour la session
+    bool  nogo_done     // true des que l'heure no-go est atteinte
+    bool  solder_done   // true des que l'heure solder est atteinte
+    int   dayKey
+
+var EffState eff_s = EffState.new(
+     o0           = na,
+     prevC        = na,
+     path         = 0.0,
+     current      = 0.0,
+     nogo_value   = na,
+     solder_value = na,
+     anchored     = false,
+     nogo_done    = false,
+     solder_done  = false,
+     dayKey       = 0)
+
+// Effective L/S amp1/amp2 values (overridden if Auto NY is enabled, apres dashboard reco)
+amp1L_eff = amp1L_Pts
+amp1S_eff = amp1S_Pts
+amp2L_eff = amp2L_Pts
+amp2S_eff = amp2S_Pts
 
 // ── Detection heure d'ete Paris (CEST = GMT+2) ────────────────────────────────
 // Dernier dimanche de mars -> dernier dimanche d'octobre
@@ -968,16 +1042,18 @@ if show_mid and not na(mid_open)
 p50r = array.from(0.65, 0.77, 0.78, 0.78, 0.70)  // 50% des jours depassent
 p75r = array.from(0.92, 1.02, 1.22, 1.03, 0.90)  // 25% des jours depassent
 p90r = array.from(1.27, 1.26, 1.79, 1.33, 1.42)  // 10% des jours depassent
-// Amplitude recommandee : methode (v1.9, diviseur ajuste v1.18)
+// Amplitude recommandee : methode (v1.9, diviseur ajuste v1.18, dissociation L/S v1.19)
 // La moyenne est calculee UNE SEULE FOIS avec l'amplitude NY estimee P90 (la plus grande) :
 //   avg = (Amp.NY P90 + somme amplitudes NY recentes) / (nb_jours_reellement_charges + 1)
 // Le diviseur utilise la taille reelle de l'historique (array.size(ny_amp_hist)) au
 // lieu de N figé : evite de sous-estimer la moyenne en phase de warmup ou si moins
 // de N jours sont disponibles. Coherent avec la version Tradovate.
-// Puis deux coefficients differents donnent les deux Amp. Reco :
-//   reco_faible = round(coef_faible * avg)    [0.30 par defaut]
-//   reco_fort   = round(coef_fort   * avg)    [0.20 par defaut]
-// N et les deux coefficients sont configurables.
+// Puis 4 coefficients differents donnent les 4 Amp. Reco (Long / Short, Amp1 / Amp2) :
+//   reco_A1L = round(coef_A1L * avg)    [0.390 par defaut]
+//   reco_A1S = round(coef_A1S * avg)    [0.330 par defaut]
+//   reco_A2L = round(coef_A2L * avg)    [0.420 par defaut]
+//   reco_A2S = round(coef_A2S * avg)    [0.255 par defaut]
+// N et les 4 coefficients sont configurables.
 
 // Somme et moyenne simple des N dernieres amplitudes NY (15h30-22h Paris)
 sum_5d_ny  = 0.0
@@ -1002,96 +1078,139 @@ amp_ny_fort   = ratio_fort   * use_amp   // amplitude NY estimee mini - percenti
 // Diviseur = nombre de jours NY reellement charges + 1 (le "+1" = amp_ny_faible).
 avg_reco = (amp_ny_faible + sum_5d_ny) / (hist_size + 1)
 
-amp_reco_faible = math.round(reco_coef_faible * avg_reco)
-amp_reco_fort   = math.round(reco_coef_fort   * avg_reco)
+amp_reco_a1l = math.round(reco_coef_a1l * avg_reco)
+amp_reco_a1s = math.round(reco_coef_a1s * avg_reco)
+amp_reco_a2l = math.round(reco_coef_a2l * avg_reco)
+amp_reco_a2s = math.round(reco_coef_a2s * avg_reco)
 
-// Auto NY : surcharge amp1/amp2 du greffon avec les Amp. Reco du dashboard
-//  - amp1 (plus grande, signal contrarien) <- amp_reco_faible (vert, risque faible)
-//  - amp2 (plus petite, continuation)      <- amp_reco_fort   (rouge, risque fort)
+// Auto NY : surcharge les 4 amplitudes du greffon avec les Amp. Reco du dashboard
+//   L = Long  (marque verte / signal achat)
+//   S = Short (marque rouge / signal vente)
 if amp_auto_ny
-    amp1Pts_eff := amp_reco_faible / amp_pointSize
-    amp2Pts_eff := amp_reco_fort   / amp_pointSize
+    amp1L_eff := amp_reco_a1l / amp_pointSize
+    amp1S_eff := amp_reco_a1s / amp_pointSize
+    amp2L_eff := amp_reco_a2l / amp_pointSize
+    amp2S_eff := amp_reco_a2s / amp_pointSize
 
-if barstate.islast and dash_mode != "Masquer"
+// ── Live preview efficience (avant le dashboard) ─────────────────────────────
+// Sur les charts > M1, request.security_lower_tf delivre les M1 batches a la
+// cloture de chaque barre du chart : sans cette section, le dashboard attend
+// la fin de la 1ere barre apres 15h30 pour afficher une valeur (5 min sur M5,
+// 15 min sur M15, etc.).
+//
+// Deux mecanismes :
+//  1. Fallback anchor : si l'heure Paris de la barre realtime vient de franchir
+//     NY AM et qu'aucune M1 n'a encore ancre, on ancre avec l'open de la barre
+//     courante. Sur tout chart aligne sur la transition 15h30 (M1/M2/M3/M5/M15...),
+//     cet open est identique a l'open de la M1 contenant 15h30:00, donc la
+//     prochaine M1 batch s'integrera proprement par-dessus.
+//  2. Live preview : si deja ancre, on recalcule eff_s.current en ajoutant le
+//     close courant du chart comme "tick supplementaire" au-dessus du path
+//     committe. Le path n'est PAS modifie : la prochaine M1 batch le mettra a
+//     jour proprement.
+if eff_enabled and barstate.isrealtime
+    int eff_live_paris_mins = hour(time, "Europe/Paris") * 60 + minute(time, "Europe/Paris")
+    int eff_live_ny_am_mins = ny_hour * 60 + ny_min
+    int eff_live_prev_mins  = na(time[1]) ? 0 : hour(time[1], "Europe/Paris") * 60 + minute(time[1], "Europe/Paris")
+
+    // Fallback anchor sur la barre de transition 15h30
+    if not eff_s.anchored and eff_live_prev_mins < eff_live_ny_am_mins and eff_live_paris_mins >= eff_live_ny_am_mins
+        eff_s.o0       := open
+        eff_s.prevC    := open
+        eff_s.path     := 0.0
+        eff_s.current  := 0.0
+        eff_s.anchored := true
+
+    // Live preview de eff_s.current avec le close courant du chart
+    if eff_s.anchored and not na(eff_s.prevC) and not na(eff_s.o0)
+        float eff_live_preview_path = eff_s.path + math.abs(close - eff_s.prevC)
+        eff_s.current := eff_live_preview_path > 0 ? math.abs(close - eff_s.o0) / eff_live_preview_path : 0.0
+
+if barstate.islast and show_dash
     dir_str = is_down ? "DOWN  ▼" : "UP  ▲"
     dir_col = is_down ? color.new(#ff7b72, 0) : color.new(#3fb950, 0)
     amp_str = str.tostring(math.round(use_amp, 1)) + " pts"
 
-    if dash_mode == "Complet"
-        frz_str = frozen ? "Fige" : "Dynamique"
-        frz_col = frozen ? color.new(#3fb950, 0) : color.new(#c99a2c, 0)
+    // ===== Dashboard : 3 colonnes (label | Long | Short) sur 7 lignes =====
+    frz_str_s = frozen ? "Fige" : "Dynamique"
+    frz_col_s = frozen ? color.new(#3fb950, 0) : color.new(#c99a2c, 0)
 
-        var table t = table.new(
-             position.bottom_right, 5, 6,
-             bgcolor      = color.new(color.gray, 85),
-             border_width = 0)
+    // Valeurs effectives affichees (en points / unites de prix)
+    a1l_disp = math.round(amp1L_eff * amp_pointSize)
+    a1s_disp = math.round(amp1S_eff * amp_pointSize)
+    a2l_disp = math.round(amp2L_eff * amp_pointSize)
+    a2s_disp = math.round(amp2S_eff * amp_pointSize)
 
-        // Ligne 0 : Direction + Jour + Etat
-        table.cell(t, 0, 0, "Direction Pre-NY", text_color=color.gray,            text_size=size.small, text_halign=text.align_left)
-        table.cell(t, 1, 0, dir_str,            text_color=dir_col,               text_size=size.small)
-        table.cell(t, 2, 0, "",                 text_size=size.small)
-        table.cell(t, 3, 0, dow_name,           text_color=color.gray,            text_size=size.small)
-        table.cell(t, 4, 0, frz_str,            text_color=frz_col,               text_size=size.small)
+    // Valeurs efficience pour les colonnes No-Go / Solder
+    // Affichage live tant que le gate n'est pas atteint, puis fige a la valeur du gate.
+    // Couleur : gris tant que le seuil n'est pas atteint, rouge des qu'il l'est.
+    // Le freeze est decide en comparant l'heure Paris de la barre courante du
+    // chart aux seuils nogo / solder, plutot qu'en lisant eff_s.nogo_done /
+    // eff_s.solder_done : le dashboard est rendu PLUS HAUT dans le script que
+    // la boucle des M1 (qui met a jour eff_s). Resultat : nogo se fige des que
+    // la barre du chart franchit 15h45 Paris, sans attendre le tour suivant.
+    int  eff_dash_h    = hour(time, "Europe/Paris")
+    int  eff_dash_m    = minute(time, "Europe/Paris")
+    int  eff_dash_mins = eff_dash_h * 60 + eff_dash_m
+    bool eff_nogo_gate_past   = eff_dash_mins >= eff_nogo_h   * 60 + eff_nogo_min
+    bool eff_solder_gate_past = eff_dash_mins >= eff_solder_h * 60 + eff_solder_min
 
-        // Ligne 1 : Amplitude Pre-NY
-        table.cell(t, 0, 1, "Amplitude Pre-NY", text_color=color.gray,            text_size=size.small, text_halign=text.align_left)
-        table.cell(t, 1, 1, amp_str,            text_color=dir_col,               text_size=size.small)
-        table.cell(t, 2, 1, "",                 text_size=size.small)
-        table.cell(t, 3, 1, "",                 text_size=size.small)
-        table.cell(t, 4, 1, "",                 text_size=size.small)
+    float  nogo_val_disp   = (eff_nogo_gate_past   and not na(eff_s.nogo_value))   ? eff_s.nogo_value   : eff_s.current
+    float  solder_val_disp = (eff_solder_gate_past and not na(eff_s.solder_value)) ? eff_s.solder_value : eff_s.current
+    string nogo_str        = (eff_enabled and eff_s.anchored) ? str.tostring(nogo_val_disp,   "0.00") : "—"
+    string solder_str      = (eff_enabled and eff_s.anchored) ? str.tostring(solder_val_disp, "0.00") : "—"
+    color  nogo_col        = (eff_enabled and eff_s.anchored and nogo_val_disp   >= eff_nogo_thr)   ? color.new(#ff7b72, 0) : color.gray
+    color  solder_col      = (eff_enabled and eff_s.anchored and solder_val_disp >= eff_solder_thr) ? color.new(#ff7b72, 0) : color.gray
 
-        // Ligne 2 : Amplitude moyenne sur N jours (NY session 15h30-22h Paris)
-        table.cell(t, 0, 2, "Amp. Moy. " + str.tostring(reco_n_days) + "d", text_color=color.gray, text_size=size.small, text_halign=text.align_left)
-        table.cell(t, 1, 2, str.tostring(math.round(mean_5d_ny)) + " pts", text_color=color.gray, text_size=size.small)
-        table.cell(t, 2, 2, "",                 text_size=size.small)
-        table.cell(t, 3, 2, "",                 text_size=size.small)
-        table.cell(t, 4, 2, "",                 text_size=size.small)
+    var table ts = table.new(
+         position.bottom_right, 3, 9,
+         bgcolor      = color.new(color.gray, 85),
+         border_width = 0)
 
-        // Ligne 3 : En-tetes colonnes
-        table.cell(t, 0, 3, "Risque",     text_color=color.gray, text_size=size.small, text_halign=text.align_left)
-        table.cell(t, 1, 3, "% dep.",     text_color=color.gray, text_size=size.small)
-        table.cell(t, 2, 3, "Ratio",      text_color=color.gray, text_size=size.small)
-        table.cell(t, 3, 3, "Amp. NY",    text_color=color.gray, text_size=size.small)
-        table.cell(t, 4, 3, "Amp. Reco",  text_color=color.gray, text_size=size.small)
+    // Row 0 : direction (col 0) + etat fige/dynamique (col 2)
+    table.cell(ts, 0, 0, dir_str,    text_color=dir_col,    text_size=size.small)
+    table.cell(ts, 1, 0, "",         text_size=size.small)
+    table.cell(ts, 2, 0, frz_str_s,  text_color=frz_col_s,  text_size=size.small)
 
-        // Ligne 4 : Faible P50 - amplitude NY mini (faible amplitude = faible risque)
-        table.cell(t, 0, 4, "Faible P50", text_color=color.new(#3fb950, 0),        text_size=size.small, text_halign=text.align_left)
-        table.cell(t, 1, 4, "50%",        text_color=color.gray,                    text_size=size.small)
-        table.cell(t, 2, 4, str.tostring(ratio_fort, "#.00") + "x",                text_color=color.gray,            text_size=size.small)
-        table.cell(t, 3, 4, str.tostring(math.round(amp_ny_fort)) + " pts",        text_color=color.gray,            text_size=size.small)
-        table.cell(t, 4, 4, str.tostring(amp_reco_faible) + " pts",                text_color=color.new(#3fb950, 0), text_size=size.small)
+    // Row 1 : Amp. Pre-NY (label + valeur)
+    table.cell(ts, 0, 1, "Amp. Pre-NY", text_color=color.gray, text_size=size.small)
+    table.cell(ts, 1, 1, amp_str,       text_color=dir_col,    text_size=size.small)
+    table.cell(ts, 2, 1, "",            text_size=size.small)
 
-        // Ligne 5 : Fort P90 - amplitude NY maxi (grosse amplitude = gros risque)
-        table.cell(t, 0, 5, "Fort   P90", text_color=color.new(#ff7b72, 0),        text_size=size.small, text_halign=text.align_left)
-        table.cell(t, 1, 5, "10%",        text_color=color.gray,                    text_size=size.small)
-        table.cell(t, 2, 5, str.tostring(ratio_faible, "#.00") + "x",              text_color=color.gray,            text_size=size.small)
-        table.cell(t, 3, 5, str.tostring(math.round(amp_ny_faible)) + " pts",      text_color=color.gray,            text_size=size.small)
-        table.cell(t, 4, 5, str.tostring(amp_reco_fort) + " pts",                  text_color=color.new(#ff7b72, 0), text_size=size.small)
-    else
-        // ===== Mode Simplifie : 2 colonnes (Amp. Reco | Amp. NY), sans legendes =====
-        frz_str_s = frozen ? "Fige" : "Dynamique"
-        frz_col_s = frozen ? color.new(#3fb950, 0) : color.new(#c99a2c, 0)
+    // Row 2 : Amp. Moy. Nd (label + valeur)
+    table.cell(ts, 0, 2, "Amp. Moy. " + str.tostring(reco_n_days) + "d", text_color=color.gray, text_size=size.small)
+    table.cell(ts, 1, 2, str.tostring(math.round(mean_5d_ny)) + " pts",  text_color=color.gray, text_size=size.small)
+    table.cell(ts, 2, 2, "",                                              text_size=size.small)
 
-        var table ts = table.new(
-             position.bottom_right, 2, 6,
-             bgcolor      = color.new(color.gray, 85),
-             border_width = 0)
+    // Row 3 : Amp. NY P50 / P90 (label + 2 valeurs)
+    table.cell(ts, 0, 3, "Amp. NY",                                          text_color=color.gray,            text_size=size.small)
+    table.cell(ts, 1, 3, str.tostring(math.round(amp_ny_fort))   + " pts",   text_color=color.new(#3fb950, 0), text_size=size.small)
+    table.cell(ts, 2, 3, str.tostring(math.round(amp_ny_faible)) + " pts",   text_color=color.new(#ff7b72, 0), text_size=size.small)
 
-        // Colonne 0 : direction, label Amp. Pre-NY, label Amp. Moy. Nd, header Amp. Reco, valeurs reco
-        table.cell(ts, 0, 0, dir_str,                                       text_color=dir_col,               text_size=size.small)
-        table.cell(ts, 0, 1, "Amp. Pre-NY",                                 text_color=color.gray,            text_size=size.small)
-        table.cell(ts, 0, 2, "Amp. Moy. " + str.tostring(reco_n_days) + "d", text_color=color.gray,            text_size=size.small)
-        table.cell(ts, 0, 3, "Amp. Reco",                                   text_color=color.gray,            text_size=size.small)
-        table.cell(ts, 0, 4, str.tostring(amp_reco_faible) + " pts",        text_color=color.new(#3fb950, 0), text_size=size.small)
-        table.cell(ts, 0, 5, str.tostring(amp_reco_fort)   + " pts",        text_color=color.new(#ff7b72, 0), text_size=size.small)
+    // Row 4 : header "Long" / "Short"
+    table.cell(ts, 0, 4, "Amp. Reco", text_color=color.gray,            text_size=size.small)
+    table.cell(ts, 1, 4, "Long",      text_color=color.new(#3fb950, 0), text_size=size.small)
+    table.cell(ts, 2, 4, "Short",     text_color=color.new(#ff7b72, 0), text_size=size.small)
 
-        // Colonne 1 : etat Fige/Dynamique, valeur Pre-NY, valeur Moy. Nd, header Amp. NY et valeurs NY estimees
-        table.cell(ts, 1, 0, frz_str_s,                                     text_color=frz_col_s,             text_size=size.small)
-        table.cell(ts, 1, 1, amp_str,                                       text_color=dir_col,               text_size=size.small)
-        table.cell(ts, 1, 2, str.tostring(math.round(mean_5d_ny)) + " pts", text_color=color.gray,            text_size=size.small)
-        table.cell(ts, 1, 3, "Amp. NY",                                     text_color=color.gray,            text_size=size.small)
-        table.cell(ts, 1, 4, str.tostring(math.round(amp_ny_fort))   + " pts", text_color=color.new(#3fb950, 0), text_size=size.small)
-        table.cell(ts, 1, 5, str.tostring(math.round(amp_ny_faible)) + " pts", text_color=color.new(#ff7b72, 0), text_size=size.small)
+    // Row 5 : A1 (label + A1L + A1S)
+    table.cell(ts, 0, 5, "A1",                              text_color=color.gray,            text_size=size.small)
+    table.cell(ts, 1, 5, str.tostring(a1l_disp) + " pts",   text_color=color.new(#3fb950, 0), text_size=size.small)
+    table.cell(ts, 2, 5, str.tostring(a1s_disp) + " pts",   text_color=color.new(#ff7b72, 0), text_size=size.small)
+
+    // Row 6 : A2 (label + A2L + A2S)
+    table.cell(ts, 0, 6, "A2",                              text_color=color.gray,            text_size=size.small)
+    table.cell(ts, 1, 6, str.tostring(a2l_disp) + " pts",   text_color=color.new(#3fb950, 0), text_size=size.small)
+    table.cell(ts, 2, 6, str.tostring(a2s_disp) + " pts",   text_color=color.new(#ff7b72, 0), text_size=size.small)
+
+    // Row 7 : header No-Go / Solder
+    table.cell(ts, 0, 7, "",       text_size=size.small)
+    table.cell(ts, 1, 7, "No-Go",  text_color=color.gray, text_size=size.small)
+    table.cell(ts, 2, 7, "Solder", text_color=color.gray, text_size=size.small)
+
+    // Row 8 : Filtre efficience (label + valeur No-Go + valeur Solder)
+    table.cell(ts, 0, 8, "Filtre efficience", text_color=color.gray, text_size=size.small)
+    table.cell(ts, 1, 8, nogo_str,            text_color=nogo_col,   text_size=size.small)
+    table.cell(ts, 2, 8, solder_str,          text_color=solder_col, text_size=size.small)
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1156,6 +1275,54 @@ f_drawAmpMarker(triggerPrice, useBearColor, t) =>
     col   = useBearColor ? amp_bearColor : amp_bullColor
     line.new(x1=t - halfW, y1=triggerPrice, x2=t + halfW, y2=triggerPrice,
              xloc=xloc.bar_time, color=col, width=amp_lineWidth)
+
+// === Traitement efficience Kaufman sur une bougie M1 ===
+// Formule : eff = |close - o0| / somme |close - prevClose|
+// avec o0 = open de la 1ere M1 de la session NY.
+// Bornee [0, 1]. Reinitialisation chaque jour a minuit timezone amp_tz_id.
+f_processEffBar(float o, float c, int t) =>
+    // 1) Reset journalier
+    int dk = year(t, amp_tz_id) * 10000 + month(t, amp_tz_id) * 100 + dayofmonth(t, amp_tz_id)
+    if eff_s.dayKey != 0 and dk != eff_s.dayKey
+        eff_s.o0           := na
+        eff_s.prevC        := na
+        eff_s.path         := 0.0
+        eff_s.current      := 0.0
+        eff_s.nogo_value   := na
+        eff_s.solder_value := na
+        eff_s.anchored     := false
+        eff_s.nogo_done    := false
+        eff_s.solder_done  := false
+    eff_s.dayKey := dk
+
+    // 2) Horaires en minutes Paris
+    int parisMinsLocal = hour(t, "Europe/Paris") * 60 + minute(t, "Europe/Paris")
+    int nyAmMinsLocal  = ny_hour       * 60 + ny_min
+    int nogoMins       = eff_nogo_h    * 60 + eff_nogo_min
+    int solderMins     = eff_solder_h  * 60 + eff_solder_min
+
+    // 3) Ancrage a la 1ere M1 dont parisMins >= nyAmMins
+    if not eff_s.anchored and parisMinsLocal >= nyAmMinsLocal
+        eff_s.o0       := o
+        eff_s.prevC    := o
+        eff_s.path     := 0.0
+        eff_s.current  := 0.0
+        eff_s.anchored := true
+
+    // 4) Accumulation a chaque M1 ancree
+    if eff_s.anchored
+        eff_s.path    := eff_s.path + math.abs(c - eff_s.prevC)
+        eff_s.prevC   := c
+        eff_s.current := eff_s.path > 0 ? math.abs(c - eff_s.o0) / eff_s.path : 0.0
+
+    // 5) Gel des valeurs aux deux gates horaires
+    if eff_s.anchored and not eff_s.nogo_done and parisMinsLocal >= nogoMins
+        eff_s.nogo_value := eff_s.current
+        eff_s.nogo_done  := true
+
+    if eff_s.anchored and not eff_s.solder_done and parisMinsLocal >= solderMins
+        eff_s.solder_value := eff_s.current
+        eff_s.solder_done  := true
 
 // === Traitement d'une bougie M1 ===
 f_processAmpBar(float h, float l, int t) =>
@@ -1292,31 +1459,38 @@ f_processAmpBar(float h, float l, int t) =>
                 amp_s.swingHighTime := pivotTime
 
     // 5) Ajustement pre-NY AM : si actif et avant l'heure NY AM (Paris, ref. indicateur),
-    // on applique le coef aux deux amplitudes Amp1 / Amp2.
-    float preNyMult   = (amp_preNyAdjust and not inNyAm) ? amp_preNyCoef : 1.0
-    float amp1Pts_now = amp1Pts_eff * preNyMult
-    float amp2Pts_now = amp2Pts_eff * preNyMult
+    // on applique le coef aux 4 amplitudes L/S.
+    float preNyMult = (amp_preNyAdjust and not inNyAm) ? amp_preNyCoef : 1.0
+    float amp1L_now = amp1L_eff * preNyMult
+    float amp1S_now = amp1S_eff * preNyMult
+    float amp2L_now = amp2L_eff * preNyMult
+    float amp2S_now = amp2S_eff * preNyMult
 
     // State machine 24h/24 pour rester coherente quelle que soit l'heure de
     // debut de fenetre. Les marques visuelles sont gatees par inWindow.
-    float amp1Price = amp1Pts_now * amp_pointSize
-    float amp2Price = amp2Pts_now * amp_pointSize
+    // Convention :
+    //   - direction "up"   = mouvement bull  -> marque ROUGE (signal vente) -> trade SHORT -> A1S / A2S
+    //   - direction "down" = mouvement bear  -> marque VERTE (signal achat) -> trade LONG  -> A1L / A2L
+    float amp1L_Price = amp1L_now * amp_pointSize
+    float amp1S_Price = amp1S_now * amp_pointSize
+    float amp2L_Price = amp2L_now * amp_pointSize
+    float amp2S_Price = amp2S_now * amp_pointSize
 
     // -------- Phase 1 : searching --------
-    // Les deux directions sont armees en parallele : meme si une tendance
-    // forte ecrase sans cesse swingLow, le swingHigh d'avant la tendance
-    // reste memorise, donc bearTrigger reste arme.
+    // Les deux directions sont armees en parallele :
+    //   - bullTrigger (futur short) utilise A1S
+    //   - bearTrigger (futur long)  utilise A1L
     if amp_s.phase == "searching"
         bool bullTriggered = false
         float bullTrigger  = na
         if not na(amp_s.swingLow)
-            bullTrigger := amp_s.swingLow + amp1Price
+            bullTrigger := amp_s.swingLow + amp1S_Price
             if h >= bullTrigger
                 bullTriggered := true
         bool bearTriggered = false
         float bearTrigger  = na
         if not na(amp_s.swingHigh)
-            bearTrigger := amp_s.swingHigh - amp1Price
+            bearTrigger := amp_s.swingHigh - amp1L_Price
             if l <= bearTrigger
                 bearTriggered := true
 
@@ -1326,7 +1500,7 @@ f_processAmpBar(float h, float l, int t) =>
             amp_s.phase           := "tracking"
             amp_s.direction       := "up"
             amp_s.origin          := amp_s.swingLow
-            amp_s.activeAmpPts    := amp1Pts_now
+            amp_s.activeAmpPts    := amp1S_now
             amp_s.refExtreme      := bullTrigger
             amp_s.oppExtreme      := bullTrigger
             amp_s.localOpp        := bullTrigger
@@ -1339,7 +1513,7 @@ f_processAmpBar(float h, float l, int t) =>
             amp_s.phase           := "tracking"
             amp_s.direction       := "down"
             amp_s.origin          := amp_s.swingHigh
-            amp_s.activeAmpPts    := amp1Pts_now
+            amp_s.activeAmpPts    := amp1L_now
             amp_s.refExtreme      := bearTrigger
             amp_s.oppExtreme      := bearTrigger
             amp_s.localOpp        := bearTrigger
@@ -1390,16 +1564,20 @@ f_processAmpBar(float h, float l, int t) =>
         // 4) Regles par priorite
         bool markPlaced = false
 
-        // Regle 1 : Reversal (seuil = amp1 TOUJOURS, requiert un vrai retracement)
-        if amp_s.retracementSeen and localRetrace >= amp1Price
-            float revTrigger = amp_s.direction == "up" ? amp_s.refExtreme - amp1Price : amp_s.refExtreme + amp1Price
+        // Regle 1 : Reversal (seuil = A1 de la NOUVELLE direction, requiert un vrai retracement)
+        //   - direction "up" en cours  -> reversal sera "down" (long)  -> seuil A1L
+        //   - direction "down" en cours -> reversal sera "up"   (short) -> seuil A1S
+        float revAmp1Price = amp_s.direction == "up" ? amp1L_Price : amp1S_Price
+        float revAmp1Pts   = amp_s.direction == "up" ? amp1L_now   : amp1S_now
+        if amp_s.retracementSeen and localRetrace >= revAmp1Price
+            float revTrigger = amp_s.direction == "up" ? amp_s.refExtreme - revAmp1Price : amp_s.refExtreme + revAmp1Price
             string newDirection = amp_s.direction == "up" ? "down" : "up"
             bool useBearColor = newDirection == "up"
             if inWindow and revTrigger >= l and revTrigger <= h
                 f_drawAmpMarker(revTrigger, useBearColor, t)
             amp_s.direction       := newDirection
             amp_s.origin          := amp_s.refExtreme
-            amp_s.activeAmpPts    := amp1Pts_now
+            amp_s.activeAmpPts    := revAmp1Pts
             amp_s.refExtreme      := revTrigger
             amp_s.oppExtreme      := revTrigger
             amp_s.localOpp        := revTrigger
@@ -1408,10 +1586,16 @@ f_processAmpBar(float h, float l, int t) =>
             amp_s.currentPath     := "amp2"
             markPlaced            := true
 
-        // Regle 2 : Continuation (path-driven : amp1 ou amp2 selon currentPath)
+        // Regle 2 : Continuation (path-driven : A1 ou A2 selon currentPath, et L ou S selon direction)
+        //   - direction "up"   -> continuation rouge (short) -> A1S / A2S
+        //   - direction "down" -> continuation verte (long)  -> A1L / A2L
         if not markPlaced
-            float ampPathPrice = amp_s.currentPath == "amp1" ? amp1Price   : amp2Price
-            float ampPathPts   = amp_s.currentPath == "amp1" ? amp1Pts_now : amp2Pts_now
+            float dirAmp1Price = amp_s.direction == "up" ? amp1S_Price : amp1L_Price
+            float dirAmp2Price = amp_s.direction == "up" ? amp2S_Price : amp2L_Price
+            float dirAmp1Pts   = amp_s.direction == "up" ? amp1S_now   : amp1L_now
+            float dirAmp2Pts   = amp_s.direction == "up" ? amp2S_now   : amp2L_now
+            float ampPathPrice = amp_s.currentPath == "amp1" ? dirAmp1Price : dirAmp2Price
+            float ampPathPts   = amp_s.currentPath == "amp1" ? dirAmp1Pts   : dirAmp2Pts
             if recovery >= ampPathPrice
                 float contTrigger = amp_s.direction == "up" ? amp_s.oppExtreme + ampPathPrice : amp_s.oppExtreme - ampPathPrice
                 bool useBearColor = amp_s.direction == "up"
@@ -1426,13 +1610,40 @@ f_processAmpBar(float h, float l, int t) =>
                 amp_s.retracementSeen := false
                 amp_s.currentPath     := "amp2"
 
-// === Entry point greffon ===
+// === Entry point greffon + efficience ===
 // Force M1 quelle que soit la TF du chart. Si chart < M1, retombe sur la TF du chart.
+// On demande aussi open et close pour le calcul de l'efficience.
 string amp_forcedTf = timeframe.in_seconds(timeframe.period) >= 60 ? "1" : timeframe.period
-[amp_m1_h, amp_m1_l, amp_m1_t] = request.security_lower_tf(syminfo.tickerid, amp_forcedTf, [high, low, time])
+[amp_m1_h, amp_m1_l, amp_m1_o, amp_m1_c, amp_m1_t] = request.security_lower_tf(syminfo.tickerid, amp_forcedTf, [high, low, open, close, time])
 
-if show_marks and not na(amp_m1_h)
+if (show_marks or eff_enabled) and not na(amp_m1_h)
     int amp_n = array.size(amp_m1_h)
     if amp_n > 0
         for i = 0 to amp_n - 1
-            f_processAmpBar(array.get(amp_m1_h, i), array.get(amp_m1_l, i), array.get(amp_m1_t, i))
+            float m1_h = array.get(amp_m1_h, i)
+            float m1_l = array.get(amp_m1_l, i)
+            float m1_o = array.get(amp_m1_o, i)
+            float m1_c = array.get(amp_m1_c, i)
+            int   m1_t = array.get(amp_m1_t, i)
+            if show_marks
+                f_processAmpBar(m1_h, m1_l, m1_t)
+            if eff_enabled
+                f_processEffBar(m1_o, m1_c, m1_t)
+
+// === Alertes efficience ===
+// Detection de la transition false -> true au franchissement du gate horaire.
+// Une seule emission par jour grace au reset journalier de eff_s.nogo_done / eff_s.solder_done.
+// Pine v6 n'accepte pas nz() sur un champ UDT bool historique : on tracke
+// l'etat de la barre precedente avec deux var bool dedies au niveau script.
+var bool eff_prev_nogo_done   = false
+var bool eff_prev_solder_done = false
+
+nogo_alert_fires   = eff_enabled and eff_s.nogo_done   and not eff_prev_nogo_done   and not na(eff_s.nogo_value)   and eff_s.nogo_value   >= eff_nogo_thr
+solder_alert_fires = eff_enabled and eff_s.solder_done and not eff_prev_solder_done and not na(eff_s.solder_value) and eff_s.solder_value >= eff_solder_thr
+
+alertcondition(nogo_alert_fires,   title="Efficience NO-GO",   message="Filtre efficience NY au-dessus du seuil No-Go a l'heure gate. Ne pas prendre d'entree contrarienne aujourd'hui.")
+alertcondition(solder_alert_fires, title="Efficience SOLDER", message="Filtre efficience NY au-dessus du seuil Solder a l'heure gate. Envisager de solder le fade en cours.")
+
+// Memorisation pour la prochaine barre (apres evaluation des alertes)
+eff_prev_nogo_done   := eff_s.nogo_done
+eff_prev_solder_done := eff_s.solder_done

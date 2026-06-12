@@ -89,18 +89,26 @@ Greffon intégré (port de l'indicateur **JCO Amplitude v2.2.0**) qui pose autom
 
 ### Principe du greffon
 
-Mécanique à deux phases :
+Mécanique à deux phases avec **dissociation Long / Short** des amplitudes depuis v1.19 (4 valeurs au lieu de 2) :
+
+- `A1L` / `A1S` — amplitude 1 (reversal) pour Long (marque verte) / Short (marque rouge)
+- `A2L` / `A2S` — amplitude 2 (continuation) pour Long / Short
 
 **Phase 1 — Searching (1ère marque du jour)**
-Détection du dernier swing valide (selon `Swing left bars` / `Swing right bars`). Depuis le swing, on attend que `amp1` soit atteint dans le sens opposé. Une marque est posée au prix exact `swing ± amp1` → passage en phase 2.
+Détection du dernier swing valide (selon `Swing left bars` / `Swing right bars`). Les deux directions sont armées en parallèle :
+
+- `bullTrigger = swingLow + A1S` (signal vente / marque rouge → futur trade short)
+- `bearTrigger = swingHigh - A1L` (signal achat / marque verte → futur trade long)
+
+Le premier des deux atteint pose une marque et passe en phase 2.
 
 **Phase 2 — Tracking (cycle après la 1ère marque)**
 Deux règles évaluées par priorité :
 
-1. **Reversal** (seuil = `amp1`, toujours) : si le prix retrace d'au moins `amp1` depuis l'extrême atteint, marque posée de couleur opposée, direction inversée.
-2. **Continuation** (path-driven, `amp1` ou `amp2` selon le contexte) : si le prix repart dans le sens de la tendance, marque posée à l'extrême opposé + `amp_path`.
+1. **Reversal** (seuil = `A1` de la **nouvelle direction**) : si le prix retrace d'au moins `A1L` (resp. `A1S`) depuis l'extrême atteint, marque posée de couleur opposée, direction inversée.
+2. **Continuation** (path-driven, `A1` ou `A2` de la **direction en cours**) : si le prix repart dans le sens de la tendance, marque posée à l'extrême opposé + `A_path`.
 
-Le path (amp1 vs amp2) est ré-évalué uniquement quand l'extrême opposé fait un nouveau plus bas (ou plus haut). Si le retracement dépasse 30% du mouvement total depuis l'origine → `amp1` (pleine amplitude), sinon `amp2` (continuation réduite).
+Le path (A1 vs A2) est ré-évalué uniquement quand l'extrême opposé fait un nouveau plus bas (ou plus haut). Si le retracement dépasse 30% du mouvement total depuis l'origine → `A1` (pleine amplitude), sinon `A2` (continuation réduite).
 
 ### Code couleur (lecture contrarienne)
 
@@ -116,20 +124,22 @@ Le path (amp1 vs amp2) est ré-évalué uniquement quand l'extrême opposé fait
 - **Reset journalier** à minuit dans la timezone choisie.
 - Toggle `Afficher les marques` pour activer/désactiver le greffon (case à cocher en tête du groupe).
 
-### Auto NY (v1.11)
+### Auto NY (v1.11, dissociation L/S v1.19)
 
-Case à cocher **Auto NY** (activée par défaut depuis v1.12) : `Amp1` et `Amp2` du greffon sont remplacés automatiquement par les **Amp. Reco** du dashboard :
+Case à cocher **Auto NY** (activée par défaut depuis v1.12) : les 4 amplitudes du greffon (A1L / A1S / A2L / A2S) sont remplacées automatiquement par les **Amp. Reco** calculées depuis l'historique NY récent. Depuis v1.19, **4 coefficients distincts** sont appliqués directement à la moyenne lissée :
 
-- `Amp1` ← Amp. Reco **Faible** (vert, risque faible — plus grande amplitude)
-- `Amp2` ← Amp. Reco **Fort** (rouge, risque fort — plus petite amplitude)
+- `A1L = round(0.390 × avg_reco)` — reversal long
+- `A1S = round(0.330 × avg_reco)` — reversal short
+- `A2L = round(0.420 × avg_reco)` — continuation long
+- `A2S = round(0.255 × avg_reco)` — continuation short
 
-Pratique pour adapter automatiquement le greffon à la volatilité récente du marché sans ressaisir les paramètres chaque jour.
+Les 4 coefficients sont configurables dans le groupe **"Calcul Amp. Reco"**. Pratique pour adapter automatiquement le greffon à la volatilité récente du marché sans ressaisir les paramètres chaque jour.
 
 ### Ajustement pré-NY AM (v1.11)
 
-Case à cocher **Ajuster les amplitudes avant NY AM** (activée par défaut depuis v1.12) + coefficient configurable (défaut **0.5**). Avant l'heure NY AM définie dans le groupe « Session NY AM » (Paris), `Amp1` et `Amp2` (qu'ils soient saisis manuellement ou issus de Auto NY) sont multipliés par ce coef. À 15h30 Paris, on revient automatiquement aux valeurs pleines.
+Case à cocher **Ajuster les amplitudes avant NY AM** (activée par défaut depuis v1.12) + coefficient configurable (défaut **0.5**). Avant l'heure NY AM définie dans le groupe « Session NY AM » (Paris), les **4 amplitudes L/S** (qu'elles soient saisies manuellement ou issues de Auto NY) sont multipliées par ce coef. À 15h30 Paris, on revient automatiquement aux valeurs pleines.
 
-Exemple : Amp1 = 100, Amp2 = 60, coef = 0.5. Avant 15h30 Paris → Amp1 = 50, Amp2 = 30. À partir de 15h30 → Amp1 = 100, Amp2 = 60. Permet de coller à la volatilité réduite des séances asiatique et européenne tout en gardant la pleine amplitude pendant la session NY.
+Exemple : A1L = 120, A1S = 100, A2L = 127, A2S = 77, coef = 0.5. Avant 15h30 Paris → A1L = 60, A1S = 50, A2L = 63.5, A2S = 38.5. À partir de 15h30 → valeurs pleines restaurées. Permet de coller à la volatilité réduite des séances asiatique et européenne tout en gardant la pleine amplitude pendant la session NY.
 
 ### Restart à chaque session (v1.12)
 
@@ -137,16 +147,18 @@ Case à cocher **Restart recherche Amp1 à chaque session** (décochée par déf
 
 Les **swings high/low** détectés juste avant l'ouverture sont **conservés** comme référence. Un mouvement amorcé juste avant l'open continue donc de compter dans le calcul Amp1.
 
-Exemple : à 15h29 une bougie haussière de 30 pts forme un swing low à X. À 15h30, l'open NY AM réinitialise la phase à `searching` (swing low toujours = X). Si la bougie d'open monte de 80 pts (high atteint X+110), le trigger `swing + Amp1 (100)` est atteint → marque Amp1 posée.
+Exemple : à 15h29 une bougie haussière de 30 pts forme un swing low à X. À 15h30, l'open NY AM réinitialise la phase à `searching` (swing low toujours = X). Si la bougie d'open monte de 80 pts (high atteint X+110), le trigger `swing + A1S (100)` est atteint → marque rouge posée.
 
 Sans cette option (défaut), la state machine tourne en continu : si elle était déjà en phase tracking avant l'ouverture, elle reste en tracking et pose des marques de continuation/reversal selon la logique habituelle.
 
 ### Paramètres principaux
 
-- **Amp1** (défaut : 100 pts) — amplitude pour la 1ère marque et les reversals
-- **Amp2** (défaut : 60 pts) — amplitude pour les continuations
-- **Auto NY** (défaut : décoché) — surcharge Amp1/Amp2 avec les Amp. Reco du dashboard
-- **Ajuster les amplitudes avant NY AM** + **Coef pre-NY AM** (défauts : décoché / 0.5)
+- **A1L** (défaut : **120** pts) — Amp1 Long, reversal pour marque verte (futur trade long)
+- **A1S** (défaut : **100** pts) — Amp1 Short, reversal pour marque rouge (futur trade short)
+- **A2L** (défaut : **127** pts) — Amp2 Long, continuation pour marque verte
+- **A2S** (défaut : **77** pts) — Amp2 Short, continuation pour marque rouge
+- **Auto NY** (défaut : **coché** depuis v1.12) — surcharge les 4 amplitudes L/S avec les Amp. Reco calculées par le dashboard
+- **Ajuster les amplitudes avant NY AM** + **Coef pre-NY AM** (défauts : coché / 0.5)
 - **Prix par point** (défaut : 1.0 pour NQ/MNQ/ES)
 - **Méthode détection swing** (défaut : `Durée` depuis v1.15) — choix entre :
   - `Bougies` : pivot défini par **Swing left/right bars** (défaut 3/3, pivot strict sur 7 bougies M1)
@@ -158,36 +170,25 @@ Sans cette option (défaut), la state machine tourne en continu : si elle était
 
 ## Dashboard
 
-Affiché en bas à droite du graphique. **3 modes** disponibles via la liste déroulante "Mode d'affichage" :
+Affiché en bas à droite du graphique, **3 colonnes × 9 lignes** (refonte v1.19) :
 
-### Mode Complet
+| Ligne | Colonne 0 (label)    | Colonne 1 (Long / vert)        | Colonne 2 (Short / rouge)     |
+|-------|----------------------|--------------------------------|-------------------------------|
+| 0     | UP ▲ / DOWN ▼        | —                              | Figé / Dynamique              |
+| 1     | « Amp. Pre-NY »      | Valeur Pre-NY (ex. 121 pts)    | —                             |
+| 2     | « Amp. Moy. Nd »     | Valeur moy. Nd (ex. 215 pts)   | —                             |
+| 3     | « Amp. NY »          | Amp. NY mini (P50, vert)       | Amp. NY maxi (P90, rouge)     |
+| 4     | « Amp. Reco »        | « Long » (header vert)         | « Short » (header rouge)      |
+| 5     | « A1 »               | A1L (vert)                     | A1S (rouge)                   |
+| 6     | « A2 »               | A2L (vert)                     | A2S (rouge)                   |
+| 7     | —                    | « No-Go » (header gris)        | « Solder » (header gris)      |
+| 8     | « Filtre efficience »| Valeur No-Go (gris/rouge)      | Valeur Solder (gris/rouge)    |
 
-| Ligne            | Colonnes                                        | Description                                                    |
-|------------------|-------------------------------------------------|----------------------------------------------------------------|
-| Direction Pre-NY | UP / DOWN — Jour — Dynamique/Figé               | Direction, jour de la semaine, état                            |
-| Amplitude Pre-NY | ex. 121 pts                                     | Range total High–Low du Pre-NY                                 |
-| Amp. Moy. Nd     | ex. 215 pts                                     | Moyenne simple des N dernières amplitudes NY (15h30–22h Paris) |
-| Faible P50       | 50% dép. — Ratio — Amp. NY mini — **Amp. Reco** | 50% des jours dépassent ; Amp. NY = mini (risque faible)       |
-| Fort P90         | 10% dép. — Ratio — Amp. NY maxi — **Amp. Reco** | 10% des jours dépassent ; Amp. NY = maxi (gros risque)         |
+- **Lignes 0-3** : direction Pre-NY, amplitude du jour, moyenne historique, estimations NY.
+- **Lignes 4-6** : amplitudes recommandées du greffon, dissociées Long / Short (v1.19).
+- **Lignes 7-8** : filtre efficience Kaufman (v1.19). Valeur **live** avant l'heure gate, **figée** ensuite. Couleur **rouge** dès que la valeur ≥ seuil configuré, **gris** sinon.
 
-Logique d'affichage : petite amplitude (en haut, vert) = petit risque pour le trader, grande amplitude (en bas, rouge) = gros risque.
-
-### Mode Simplifié
-
-Affichage compact en 2 colonnes, sans légendes — pour utilisateurs avancés qui veulent économiser l'espace à droite du graphique :
-
-| Ligne | Colonne 0                | Colonne 1                    |
-|-------|--------------------------|------------------------------|
-| 0     | UP ▲ / DOWN ▼            | Figé / Dynamique             |
-| 1     | « Amp. Pre-NY » (label)  | Valeur Pre-NY (ex. 121 pts)  |
-| 2     | « Amp. Moy. Nd » (label) | Valeur moy. Nd (ex. 215 pts) |
-| 3     | « Amp. Reco » (header)   | « Amp. NY » (header)         |
-| 4     | Amp. Reco Faible (vert)  | Amp. NY mini (vert)          |
-| 5     | Amp. Reco Fort (rouge)   | Amp. NY maxi (rouge)         |
-
-### Mode Masquer
-
-Cache complètement le dashboard.
+Le dashboard se masque entièrement avec le toggle `Afficher le dashboard` (groupe **Dashboard**).
 
 ---
 
@@ -209,18 +210,20 @@ L'objectif est d'obtenir une amplitude recommandée **stable et raisonnable** po
 
    Le diviseur utilise le nombre **réel** de jours présents dans l'historique (au plus N), pas N figé. Évite la sous-estimation en phase de warmup.
 
-4. **Deux Amp. Reco** avec deux coefficients différents :
+4. **Quatre Amp. Reco** (dissociation L/S v1.19) avec **4 coefficients distincts** :
 
    ```text
-   Amp. Reco Faible = round(coef_faible × avg)   # défaut 0.30
-   Amp. Reco Fort   = round(coef_fort   × avg)   # défaut 0.20
+   A1L = round(0.390 × avg)   # Long Amp1 (reversal long)
+   A1S = round(0.330 × avg)   # Short Amp1 (reversal short)
+   A2L = round(0.420 × avg)   # Long Amp2 (continuation long)
+   A2S = round(0.255 × avg)   # Short Amp2 (continuation short)
    ```
 
 **Pourquoi cette méthode ?**
 
 - **Lissage** : la somme des N derniers jours intègre la dynamique récente du marché et amortit les valeurs extrêmes.
 - **Cohérence avec les statistiques** : l'estimation P90 (Amp. NY maxi) sert d'ancrage statistique haut.
-- **Deux niveaux de risque** : `Faible` (coef 0.25) pour le contrarien prudent, `Fort` (coef 0.20) plus serré.
+- **Dissociation Long / Short** (v1.19) : sur NQ, le côté short est statistiquement plus volatil que le côté long — les 4 coefs permettent de coller à cette asymétrie sans ressaisir les valeurs chaque jour.
 
 Les ratios statistiques par jour de la semaine sont issus de l'analyse historique NQ (2 jan. 2024 – 2 avr. 2026, 581 jours de trading).
 
@@ -235,15 +238,19 @@ Les ratios statistiques par jour de la semaine sont issus de l'analyse historiqu
 
 ### Paramètres Dashboard
 
-- **Mode d'affichage** : liste déroulante — `Masquer` / `Complet` / `Simplifié`
+- **Afficher le dashboard** : toggle bool (défaut **coché**) — affiche / masque le dashboard.
 
 ### Calcul Amp. Reco
 
 Configurable depuis le groupe **"Calcul Amp. Reco"** :
 
-- **Nb jours pour la somme** (défaut **5**) : nombre N de sessions NY précédentes utilisées dans la moyenne. La moyenne est divisée par N+1 (les N historiques + l'estimation P90 du jour).
-- **Coef. risque faible** (défaut **0.30**) : coefficient appliqué à la moyenne pour calculer l'Amp. Reco du niveau Faible.
-- **Coef. risque fort** (défaut **0.20**) : coefficient appliqué à la moyenne pour calculer l'Amp. Reco du niveau Fort.
+- **Nb jours pour la somme** (défaut **5**) : nombre N de sessions NY précédentes utilisées dans la moyenne. Le diviseur utilise la taille réelle de l'historique + 1 (les jours chargés + l'estimation P90 du jour).
+- **Coef A1L (Long Amp1)** (défaut **0.390**)
+- **Coef A1S (Short Amp1)** (défaut **0.330**)
+- **Coef A2L (Long Amp2)** (défaut **0.420**)
+- **Coef A2S (Short Amp2)** (défaut **0.255**)
+
+Chaque coefficient est appliqué directement à la moyenne `avg_reco` pour donner la valeur correspondante en points.
 
 ### Niveaux (toggle maître)
 
@@ -284,8 +291,8 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 ### Paramètres greffon Marques d'amplitude
 
 - **Afficher les marques** : toggle global du greffon
-- **Auto NY** (défaut **coché** depuis v1.12) : surcharge Amp1/Amp2 avec les Amp. Reco du dashboard (Faible → Amp1, Fort → Amp2)
-- **Amp1** / **Amp2** : amplitudes en points (défaut 100 / 60)
+- **Auto NY** (défaut **coché** depuis v1.12) : surcharge les 4 amplitudes L/S avec les Amp. Reco du dashboard
+- **A1L** / **A1S** / **A2L** / **A2S** (défauts **120 / 100 / 127 / 77** pts depuis v1.19) — ignorés si Auto NY est coché
 - **Ajuster les amplitudes avant NY AM** (défaut **coché** depuis v1.12) + **Coef pre-NY AM** (défaut 0.5)
 - **Restart recherche Amp1 à chaque session** (défaut décoché) — relance une recherche fraîche au début de la fenêtre et à l'open NY AM
 - **Prix par point** : 1.0 pour NQ/MNQ/ES
@@ -294,6 +301,18 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
   - Mode `Durée` : **Durée avant/après** en minutes (défaut **15/15**, nouveau v1.14 ; **Durée après ∈ [0, 120]** depuis v1.16 — 0 = pivot temps réel sur la bougie courante)
 - **Fenêtre horaire** : début/fin (défaut 7h–22h) + **Timezone** (mêmes options que Midnight NY, défaut Paris)
 - **Largeur marque** (défaut 2 bars), **épaisseur trait, couleurs bull/bear**
+
+### Paramètres Efficience NY (v1.19)
+
+Configurable depuis le groupe **"Efficience NY"** :
+
+- **Activer le filtre d'efficience** (défaut **coché**) — active le calcul, le dashboard et les 2 alertes.
+- **Seuil No-Go** (défaut **0.55**) — au-dessus de ce seuil à l'heure No-Go, le marché est jugé trop directionnel pour une entrée contrarienne.
+- **Seuil Solder** (défaut **0.40**) — au-dessus de ce seuil à l'heure Solder, envisager de solder une position contrarienne ouverte.
+- **Heure No-Go** / **Minute** (défaut **15h45** Paris)
+- **Heure Solder** / **Minute** (défaut **16h15** Paris)
+
+Les 2 alertes (`Efficience NO-GO` et `Efficience SOLDER`) se configurent via le menu **Add alert → Condition → JCO NY Amplitude Levels → [nom de l'alerte]** dans TradingView. Une seule émission par jour par alerte.
 
 ---
 
@@ -315,6 +334,36 @@ Chaque ligne (Day High, Day Low, Day 50%) est configurable indépendamment :
 ---
 
 ## Changelog
+
+### v1.19 - 2026-06-12
+
+- **Greffon — Dissociation Long / Short des amplitudes** : les 2 inputs `Amp1` et `Amp2` sont remplacés par **4 inputs** :
+  - `A1L` (Long Amp1, défaut **120**) — seuil reversal pour les marques vertes (futur trade long)
+  - `A1S` (Short Amp1, défaut **100**) — seuil reversal pour les marques rouges (futur trade short)
+  - `A2L` (Long Amp2, défaut **127**) — seuil continuation pour les marques vertes
+  - `A2S` (Short Amp2, défaut **77**) — seuil continuation pour les marques rouges
+- **Auto NY** : les 2 coefficients passent à **4** — `reco_coef_a1l` (0.390), `reco_coef_a1s` (0.330), `reco_coef_a2l` (0.420), `reco_coef_a2s` (0.255), appliqués directement à `avg_reco` (plus de facteur 0.30 intermédiaire).
+- **Convention de mapping** :
+  - Direction `"up"` (mouvement bull, marque rouge / signal vente) = futur trade **SHORT** → utilise A1S / A2S
+  - Direction `"down"` (mouvement bear, marque verte / signal achat) = futur trade **LONG** → utilise A1L / A2L
+- Le **reversal** utilise A1 de la **nouvelle direction** (celle de la marque à venir), la **continuation** utilise A1 ou A2 de la direction en cours selon le path-driven à 30%.
+
+- **Dashboard — Refonte 3 colonnes** : passage à **3 colonnes** (`label | Long | Short`) sur **9 lignes**. Affichage compact des 4 valeurs A1L / A1S / A2L / A2S sur 2 lignes (A1 et A2). Suppression de l'ancien mode "Complet" (seul "Simplifie" subsiste, plus la liste déroulante : un simple toggle Afficher / Masquer).
+
+- **Filtre Efficience NY (Kaufman) + 2 alertes** : nouveau groupe d'inputs avec :
+  - 2 seuils configurables (`Seuil No-Go` défaut **0.55**, `Seuil Solder` défaut **0.40**)
+  - 2 horaires gate configurables (`No-Go` défaut **15h45** Paris, `Solder` défaut **16h15** Paris)
+  - Toggle d'activation (`Activer le filtre d'efficience`)
+
+  Calcul : `eff = |close - o0| / sum(|close - prevClose|)` avec `o0` = open de la 1ère M1 de la session NY (15h30 Paris). Bornée [0, 1]. Reset journalier à minuit timezone amp_tz_id.
+
+  **Dashboard** : 2 nouvelles lignes en bas (header `No-Go / Solder`, puis valeurs). Valeur figée à l'heure gate, **rouge** dès que le seuil est franchi, gris sinon.
+
+  **Alertes** : 2 `alertcondition` — `Efficience NO-GO` (déclenchée à 15h45 si valeur ≥ seuil No-Go) et `Efficience SOLDER` (déclenchée à 16h15 si valeur ≥ seuil Solder). Une seule émission par jour grâce au tracking `eff_prev_*_done`.
+
+- **Efficience NY — live preview sur charts > M1** : `request.security_lower_tf` livre les M1 batches à la clôture de chaque barre du chart. Sans correctif, le dashboard attendait la fin de la 1ère barre après 15h30 (5 min sur M5, 15 min sur M15...). Deux mécanismes ajoutés :
+  - **Fallback anchor** : si la barre realtime franchit 15h30 et qu'aucune M1 n'a encore ancré, on ancre avec l'open de la barre courante (identique à l'open de la M1 contenant 15h30 sur tout chart aligné).
+  - **Live preview** : recalcul de `eff_s.current` en ajoutant le close courant du chart comme tick supplémentaire au-dessus du path committé. La prochaine M1 batch écrase proprement le path par-dessus.
 
 ### v1.18 - 2026-06-05
 
