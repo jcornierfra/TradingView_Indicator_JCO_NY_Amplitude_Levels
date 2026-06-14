@@ -120,72 +120,83 @@ Le path (A1 vs A2) est ré-évalué uniquement quand l'extrême opposé fait un 
 ### Spécificités techniques
 
 - **Force la timeframe M1** quelle que soit la TF du chart, via `request.security_lower_tf()`. Permet d'utiliser un chart M5, M15, H1 pour le contexte tout en gardant la finesse de déclenchement M1.
-- **Fenêtre d'affichage** configurable, avec **timezone configurable** (mêmes options que la ligne Midnight NY ; défaut : 7h–22h Paris).
-- **Reset journalier** à minuit dans la timezone choisie.
+- **3 sessions horaires** contiguës (London / NY AM / NY PM) couvrent la fenêtre 8h–22h par défaut, avec un jeu de 4 coefficients Auto NY indépendant par session. Hors fenêtre (22h–8h) : aucune marque tracée.
+- **Timezone configurable** (mêmes options que la ligne Midnight NY ; défaut : Paris) — pilote l'interprétation des horaires de session ET le reset journalier.
+- **Reset journalier** à minuit dans la timezone choisie. Reset par session optionnel (3 toggles distincts, tous cochés par défaut).
 - Toggle `Afficher les marques` pour activer/désactiver le greffon (case à cocher en tête du groupe).
 
-### Auto NY (v1.11, dissociation L/S v1.19)
+### Sessions horaires (v1.20)
 
-Case à cocher **Auto NY** (activée par défaut depuis v1.12) : les 4 amplitudes du greffon (A1L / A1S / A2L / A2S) sont remplacées automatiquement par les **Amp. Reco** calculées depuis l'historique NY récent. Depuis v1.19, **4 coefficients distincts** sont appliqués directement à la moyenne lissée :
+3 sessions contiguës qui couvrent la journée de trading. Chaque session a sa propre plage horaire et son propre jeu de 4 coefficients Auto NY :
 
-- `A1L = round(0.390 × avg_reco)` — reversal long
-- `A1S = round(0.330 × avg_reco)` — reversal short
-- `A2L = round(0.420 × avg_reco)` — continuation long
-- `A2S = round(0.255 × avg_reco)` — continuation short
+| Session    | Plage (par défaut, Paris) | A1L   | A1S   | A2L   | A2S   |
+|------------|---------------------------|-------|-------|-------|-------|
+| **London** | 8h00 → 15h30              | 0.175 | 0.175 | 0.250 | 0.275 |
+| **NY AM**  | 15h30 → 18h30             | 0.390 | 0.330 | 0.420 | 0.255 |
+| **NY PM**  | 18h30 → 22h00             | 0.325 | 0.225 | 0.400 | 0.300 |
 
-Les 4 coefficients sont configurables dans le groupe **"Calcul Amp. Reco"**. Pratique pour adapter automatiquement le greffon à la volatilité récente du marché sans ressaisir les paramètres chaque jour.
+**Bornes implicites** : la fin d'une session est le début de la suivante (pas de gap possible). Modifier `Heure debut NY AM` change donc la fin de London. Modifier `Heure debut NY PM` change la fin de NY AM. Seules London (début) et NY PM (fin) ont des bornes explicites.
 
-### Ajustement pré-NY AM (v1.11)
+**Sélection automatique** : à chaque M1 traitée, le greffon détermine la session courante en fonction de l'heure locale et applique les 4 amplitudes correspondantes. La state machine continue 24h/24 — seuls le DESSIN des marques (gate `inWindow`) et le choix des amplitudes dépendent de la session.
 
-Case à cocher **Ajuster les amplitudes avant NY AM** (activée par défaut depuis v1.12) + coefficient configurable (défaut **0.5**). Avant l'heure NY AM définie dans le groupe « Session NY AM » (Paris), les **4 amplitudes L/S** (qu'elles soient saisies manuellement ou issues de Auto NY) sont multipliées par ce coef. À 15h30 Paris, on revient automatiquement aux valeurs pleines.
+### Auto NY (v1.11, par session depuis v1.20)
 
-Exemple : A1L = 120, A1S = 100, A2L = 127, A2S = 77, coef = 0.5. Avant 15h30 Paris → A1L = 60, A1S = 50, A2L = 63.5, A2S = 38.5. À partir de 15h30 → valeurs pleines restaurées. Permet de coller à la volatilité réduite des séances asiatique et européenne tout en gardant la pleine amplitude pendant la session NY.
+Case à cocher **Auto NY** (activée par défaut depuis v1.12) : les 4 amplitudes du greffon sont calculées depuis l'historique NY récent via la moyenne lissée `avg_reco` et les **4 coefficients de la session courante** :
 
-### Restart à chaque session (v1.12)
+```text
+A1L_session = round(coef_A1L_session × avg_reco)
+A1S_session = round(coef_A1S_session × avg_reco)
+A2L_session = round(coef_A2L_session × avg_reco)
+A2S_session = round(coef_A2S_session × avg_reco)
+```
 
-Case à cocher **Restart recherche Amp1 à chaque session** (décochée par défaut). Si activée, l'état tracking est effacé au **début de la fenêtre** (par défaut 7h Paris) et à l'**open NY AM** (15h30 Paris) — le greffon repasse en phase `searching` pour poser une nouvelle marque Amp1.
+Les 12 coefficients (3 sessions × 4 amplitudes) sont configurables dans les groupes **Session London**, **Session NY AM** et **Session NY PM**. Pratique pour adapter le greffon à la volatilité spécifique de chaque période de la journée (London plus calme, NY AM le plus volatil sur NQ, NY PM intermédiaire).
+
+**Auto NY décoché** : les 4 inputs manuels A1L / A1S / A2L / A2S s'appliquent aux 3 sessions (mêmes valeurs partout). Pour des amplitudes différentes par session en mode manuel, cocher Auto NY.
+
+### Restart par session (v1.12, par session depuis v1.20)
+
+3 cases à cocher distinctes — `Restart recherche Amp1 au debut de London / NY AM / NY PM` — toutes **cochées par défaut**. Chaque toggle relance la phase `searching` à l'ouverture de la session correspondante, ce qui permet de poser une nouvelle marque Amp1 fraîche à chaque transition (avec les nouveaux coefs de la session).
 
 Les **swings high/low** détectés juste avant l'ouverture sont **conservés** comme référence. Un mouvement amorcé juste avant l'open continue donc de compter dans le calcul Amp1.
 
-Exemple : à 15h29 une bougie haussière de 30 pts forme un swing low à X. À 15h30, l'open NY AM réinitialise la phase à `searching` (swing low toujours = X). Si la bougie d'open monte de 80 pts (high atteint X+110), le trigger `swing + A1S (100)` est atteint → marque rouge posée.
+Exemple : à 15h29 une bougie haussière de 30 pts forme un swing low à X. À 15h30, l'open NY AM réinitialise la phase à `searching` (swing low toujours = X) et bascule sur les coefs NY AM. Si la bougie d'open monte de 80 pts (high atteint X+110), le trigger `swing + A1S NY AM (calculé via 0.330 × avg_reco)` est atteint → marque rouge posée.
 
-Sans cette option (défaut), la state machine tourne en continu : si elle était déjà en phase tracking avant l'ouverture, elle reste en tracking et pose des marques de continuation/reversal selon la logique habituelle.
+Sans la case de la session courante cochée, la state machine tourne en continu : si elle était déjà en phase tracking avant l'ouverture, elle reste en tracking et pose des marques de continuation/reversal selon la logique habituelle (avec les nouveaux coefs de la session active).
 
 ### Paramètres principaux
 
-- **A1L** (défaut : **120** pts) — Amp1 Long, reversal pour marque verte (futur trade long)
-- **A1S** (défaut : **100** pts) — Amp1 Short, reversal pour marque rouge (futur trade short)
-- **A2L** (défaut : **127** pts) — Amp2 Long, continuation pour marque verte
-- **A2S** (défaut : **77** pts) — Amp2 Short, continuation pour marque rouge
-- **Auto NY** (défaut : **coché** depuis v1.12) — surcharge les 4 amplitudes L/S avec les Amp. Reco calculées par le dashboard
-- **Ajuster les amplitudes avant NY AM** + **Coef pre-NY AM** (défauts : coché / 0.5)
+- **A1L** / **A1S** / **A2L** / **A2S** (défauts : **120 / 100 / 127 / 77** pts) — inputs manuels appliqués aux 3 sessions si Auto NY est décoché ; ignorés sinon.
+- **Auto NY** (défaut : **coché**) — calcule les 12 amplitudes (4 par session) via les coefficients par session × `avg_reco`.
 - **Prix par point** (défaut : 1.0 pour NQ/MNQ/ES)
 - **Méthode détection swing** (défaut : `Durée` depuis v1.15) — choix entre :
   - `Bougies` : pivot défini par **Swing left/right bars** (défaut 3/3, pivot strict sur 7 bougies M1)
   - `Durée` : pivot défini par **Durée avant/après** en minutes (défaut 15/15, **Durée après peut valoir 0** depuis v1.16 pour détection temps réel) — indépendant de la TF du chart, utile sur les charts sub-minute
-- **Fenêtre horaire + Timezone** (défaut : 7h–22h Paris)
+- **Timezone des sessions** (défaut : Paris) — applique à toutes les bornes horaires (London/NY AM/NY PM) et au reset journalier.
 - **Largeur marque** (défaut : 2 bars), **épaisseur trait**, **couleurs bull/bear** — personnalisation visuelle
 
 ---
 
 ## Dashboard
 
-Affiché en bas à droite du graphique, **3 colonnes × 9 lignes** (refonte v1.19) :
+Affiché en bas à droite du graphique, **3 colonnes × 9 lignes** :
 
-| Ligne | Colonne 0 (label)    | Colonne 1 (Long / vert)        | Colonne 2 (Short / rouge)     |
-|-------|----------------------|--------------------------------|-------------------------------|
-| 0     | UP ▲ / DOWN ▼        | —                              | Figé / Dynamique              |
-| 1     | « Amp. Pre-NY »      | Valeur Pre-NY (ex. 121 pts)    | —                             |
-| 2     | « Amp. Moy. Nd »     | Valeur moy. Nd (ex. 215 pts)   | —                             |
-| 3     | « Amp. NY »          | Amp. NY mini (P50, vert)       | Amp. NY maxi (P90, rouge)     |
-| 4     | « Amp. Reco »        | « Long » (header vert)         | « Short » (header rouge)      |
-| 5     | « A1 »               | A1L (vert)                     | A1S (rouge)                   |
-| 6     | « A2 »               | A2L (vert)                     | A2S (rouge)                   |
-| 7     | —                    | « No-Go » (header gris)        | « Solder » (header gris)      |
-| 8     | « Filtre efficience »| Valeur No-Go (gris/rouge)      | Valeur Solder (gris/rouge)    |
+| Ligne | Colonne 0 (label)            | Colonne 1 (Long / vert)      | Colonne 2 (Short / rouge)  |
+|-------|------------------------------|------------------------------|----------------------------|
+| 0     | UP ▲ / DOWN ▼                | —                            | Figé / Dynamique           |
+| 1     | « Amp. Pre-NY »              | Valeur Pre-NY (ex. 121 pts)  | —                          |
+| 2     | « Amp. Moy. Nd »             | Valeur moy. Nd (ex. 215 pts) | —                          |
+| 3     | « Amp. NY min/max »          | P50 (mini, rouge)            | P90 (maxi, vert)           |
+| 4     | « Amp. Reco - {SES} »        | « Long » (header vert)       | « Short » (header rouge)   |
+| 5     | « A1 »                       | A1L de la session (vert)     | A1S de la session (rouge)  |
+| 6     | « A2 »                       | A2L de la session (vert)     | A2S de la session (rouge)  |
+| 7     | Auto (vert) / Manuel (orange)| « No-Go » (header gris)      | « Solder » (header gris)   |
+| 8     | « Filtre efficience »        | Valeur No-Go (gris/rouge)    | Valeur Solder (gris/rouge) |
 
 - **Lignes 0-3** : direction Pre-NY, amplitude du jour, moyenne historique, estimations NY.
-- **Lignes 4-6** : amplitudes recommandées du greffon, dissociées Long / Short (v1.19).
+- **Ligne 4** : `{SES}` = raccourci 3 caractères de la **session courante** (`LON` / `NYA` / `NYP` / `HS`). Change automatiquement à chaque transition de session (15h30, 18h30, 22h00 par défaut).
+- **Lignes 5-6** : amplitudes recommandées de la session courante (dissociées Long / Short depuis v1.19, par session depuis v1.20).
+- **Ligne 7 col 0** : source des amplitudes — `Auto` (vert) si Auto NY coché, `Manuel` (orange) sinon. Le reste de la ligne porte le header No-Go / Solder.
 - **Lignes 7-8** : filtre efficience Kaufman (v1.19). Valeur **live** avant l'heure gate, **figée** ensuite. Couleur **rouge** dès que la valeur ≥ seuil configuré, **gris** sinon.
 
 Le dashboard se masque entièrement avec le toggle `Afficher le dashboard` (groupe **Dashboard**).
@@ -334,6 +345,47 @@ Les 2 alertes (`Efficience NO-GO` et `Efficience SOLDER`) se configurent via le 
 ---
 
 ## Changelog
+
+### v1.20 - 2026-06-14
+
+Greffon : 3 sessions horaires distinctes avec coefficients Auto NY indépendants.
+
+Le greffon ne tourne plus avec une fenêtre globale unique et un seul jeu de coefs : il se découpe maintenant en **3 sessions** contiguës qui couvrent la journée de trading, chacune avec ses 4 coefficients Auto NY :
+
+| Session    | Plage (par défaut, Paris) | A1L   | A1S   | A2L   | A2S   |
+|------------|---------------------------|-------|-------|-------|-------|
+| **London** | 8h00 → 15h30              | 0.175 | 0.175 | 0.250 | 0.275 |
+| **NY AM**  | 15h30 → 18h30             | 0.390 | 0.330 | 0.420 | 0.255 |
+| **NY PM**  | 18h30 → 22h00             | 0.325 | 0.225 | 0.400 | 0.300 |
+
+Hors fenêtre globale (22h → 8h le lendemain) : **aucune marque tracée**. La state machine continue à tourner 24h/24 pour cohérence.
+
+Bornes implicites : la fin d'une session est le début de la suivante (pas de gap possible). Modifier `Heure debut NY AM` change donc la fin de London. Modifier `Heure debut NY PM` change la fin de NY AM. Seules London (début) et NY PM (fin) ont des bornes explicites.
+
+**Reset par session** : 3 toggles distincts (`Restart recherche Amp1 au debut de London / NY AM / NY PM`), tous **cochés par défaut**. Chaque toggle relance la phase searching à l'ouverture de la session correspondante. Le swing low/high détecté avant l'ouverture reste comme référence (comportement inchangé depuis v1.12).
+
+**Inputs supprimés** :
+
+- Fenêtre globale `Debut h` / `Fin h` / `min` du greffon — la fenêtre est maintenant l'union des 3 sessions.
+- `Ajuster les amplitudes avant NY AM` + `Coef pre-NY AM` — redondant avec les coefs London dédiés, plus précis.
+- `Restart recherche Amp1 a chaque session` (toggle unique) — remplacé par les 3 toggles individuels.
+
+**Auto NY décoché** : les 4 inputs manuels `A1L` / `A1S` / `A2L` / `A2S` s'appliquent aux 3 sessions (mêmes valeurs partout). Pour des amplitudes différentes par session en mode manuel, coche Auto NY et ajuste les coefs par session.
+
+**Dashboard** : la ligne `Amp. Reco` affiche maintenant la session courante (ex : `Amp. Reco - London` / `Amp. Reco - NY AM` / `Amp. Reco - NY PM` / `Amp. Reco - Hors session`). Les valeurs A1L / A1S / A2L / A2S sur les lignes 5-6 changent dynamiquement selon la session active.
+
+**Filtre Efficience NY** : **inchangé fonctionnellement**. Ne concerne toujours que la session NY AM. Ancrage à 15h30 = `ny_hour` / `ny_min` (début session NY AM). Son groupe d'inputs est déplacé juste après Session NY AM pour la lisibilité.
+
+**Réorganisation des inputs** :
+
+- Nouveau groupe **Reference horaire** tout en haut, contenant uniquement `Timezone des sessions` (s'applique à toutes les sessions + filtre Efficience + reset journalier).
+- Ordre des groupes : `Reference horaire` → `Session London` → `Session NY AM` → `Efficience NY` → `Session NY PM` → `Dashboard` → `Calcul Amp. Reco` → ... → `Marques d'amplitude`.
+- Sessions dans l'ordre chronologique (London avant NY AM avant NY PM).
+
+**Dashboard** :
+
+- Raccourcis 3 caractères pour le nom de session sur la ligne `Amp. Reco` : **LON** (London) / **NYA** (NY AM) / **NYP** (NY PM) / **HS** (Hors session).
+- La cellule en col 0 de la ligne header No-Go / Solder (était vide) affiche maintenant la source des amplitudes : **Auto** (vert) si Auto NY coché, **Manuel** (orange) sinon. Pas de ligne ajoutée — le dashboard reste à 9 lignes.
 
 ### v1.19.1 - 2026-06-12
 

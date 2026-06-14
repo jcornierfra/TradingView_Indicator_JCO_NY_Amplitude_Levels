@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 1.19.1
+// Version: 1.20
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -38,6 +38,59 @@
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v1.20 - 2026-06-14
+//     - Greffon : 3 sessions horaires distinctes (London, NY AM, NY PM)
+//       avec coefficients Auto NY independants par session. La selection
+//       du jeu de coefficients applique aux marques se fait selon l'heure
+//       locale (timezone amp_tz_id) :
+//         * London : [london_start, ny_am_start)  defaut 8h00-15h30
+//             coefs defaut : A1L=0.175, A1S=0.175, A2L=0.250, A2S=0.275
+//         * NY AM  : [ny_am_start,  nypm_start)   defaut 15h30-18h30
+//             coefs defaut : A1L=0.390, A1S=0.330, A2L=0.420, A2S=0.255
+//             (= valeurs existantes v1.19, deplacees depuis Calcul Amp. Reco)
+//         * NY PM  : [nypm_start,   nypm_end)     defaut 18h30-22h00
+//             coefs defaut : A1L=0.325, A1S=0.225, A2L=0.400, A2S=0.300
+//       Hors fenetre globale (22h-8h) : aucune marque tracee, state
+//       machine continue 24h/24 pour coherence.
+//     - Reset session : remplacement du toggle global amp_restartOnSessions
+//       par 3 toggles distincts (london_restart, nyam_restart, nypm_restart),
+//       tous coches par defaut. Chaque toggle relance la phase searching
+//       a l'ouverture de la session correspondante. Le swing low/high
+//       detecte avant l'ouverture reste comme reference (comportement
+//       inchange depuis v1.12).
+//     - Suppression de la fenetre globale (amp_startHour/endHour/Minute) :
+//       la fenetre = union des 3 sessions. Suppression du coef pre-NY AM
+//       (amp_preNyAdjust / amp_preNyCoef) : redondant avec les coefs
+//       London dedies, plus precis.
+//     - Auto NY decoche : les 4 inputs manuels A1L/A1S/A2L/A2S s'appliquent
+//       aux 3 sessions (memes valeurs partout). Pour des amplitudes
+//       differentes par session en mode manuel, cocher Auto NY et ajuster
+//       les coefs par session.
+//     - Dashboard : la ligne "Amp. Reco" affiche maintenant la session
+//       courante (ex : "Amp. Reco - London" / "Amp. Reco - NY AM" /
+//       "Amp. Reco - NY PM" / "Amp. Reco - Hors session"). Les valeurs
+//       A1L / A1S / A2L / A2S sur les lignes 5-6 changent dynamiquement
+//       selon la session active.
+//     - Filtre Efficience NY : INCHANGE fonctionnellement - ne concerne que
+//       la session NY AM. Ancrage 15h30 = ny_hour/ny_min (debut session NY AM).
+//       Son groupe d'inputs est deplace juste apres Session NY AM pour la
+//       lisibilite (au lieu d'etre tout en bas).
+//     - Inputs reorganises :
+//         * Nouveau groupe "Reference horaire" tout en haut, contenant
+//           uniquement amp_tz (timezone unique appliquee a tous les timings :
+//           3 sessions + Efficience NY + reset journalier).
+//         * Ordre des groupes : Reference horaire -> Session London ->
+//           Session NY AM -> Efficience NY -> Session NY PM -> Dashboard ->
+//           Calcul Amp. Reco -> ... -> Marques d'amplitude.
+//         * Sessions dans l'ordre chronologique (London avant NY AM avant
+//           NY PM).
+//     - Dashboard : raccourcis 3 caracteres pour le nom de session sur la
+//       ligne "Amp. Reco" : LON (London) / NYA (NY AM) / NYP (NY PM) / HS
+//       (Hors session). Affichage plus compact.
+//     - Dashboard : la cellule en col 0 de la ligne header No-Go / Solder
+//       (etait vide) affiche maintenant la source des amplitudes - "Auto"
+//       en vert si Auto NY coche, "Manuel" en orange sinon. Pas de ligne
+//       ajoutee, dashboard reste a 9 lignes.
 //   v1.19.1 - 2026-06-12
 //     - Revue de code post-v1.19. Fixes :
 //       * Dashboard row 3 "Amp. NY" : label renomme en "Amp. NY min/max" et
@@ -255,22 +308,75 @@
 //@version=6
 indicator("JCO NY Amplitude Levels", shorttitle="JCO NY Amplitude Levels", overlay=true, max_lines_count=500)
 
-// ── Session ───────────────────────────────────────────────────────────────────
-grp_sess = "Session NY AM"
-ny_hour  = input.int(15, "Heure debut NY AM (Paris)", minval=0, maxval=23, group=grp_sess)
-ny_min   = input.int(30, "Minute debut NY AM",         minval=0, maxval=59, group=grp_sess)
+// ── Reference horaire ────────────────────────────────────────────────────────
+// Timezone unique appliquee a tous les timings : 3 sessions du greffon
+// (London / NY AM / NY PM), filtre Efficience NY, et reset journalier
+// des state machines (greffon + efficience).
+grp_tz   = "Reference horaire"
+amp_tz   = input.string("Paris", "Timezone des sessions",
+              options=["New York","Chicago","Los Angeles","London","Paris","Berlin","Tokyo","Hong Kong","Sydney","UTC"],
+              group=grp_tz)
+
+// ── Session London ────────────────────────────────────────────────────────────
+// Debut : london_startH:london_startMin (defaut 8h00, debut de la fenetre globale).
+// Fin   : implicite = debut de la session NY AM (ny_hour:ny_min).
+grp_london        = "Session London"
+london_startH     = input.int(8, "Heure debut London",  minval=0, maxval=23, group=grp_london, inline="london_start")
+london_startMin   = input.int(0, "Minute debut London", minval=0, maxval=59, group=grp_london, inline="london_start")
+london_restart    = input.bool(true, "Restart recherche Amp1 au debut de London", group=grp_london)
+london_coef_a1l   = input.float(0.175, "Coef A1L London (Long Amp1)",  minval=0.01, maxval=1.0, step=0.005, group=grp_london)
+london_coef_a1s   = input.float(0.175, "Coef A1S London (Short Amp1)", minval=0.01, maxval=1.0, step=0.005, group=grp_london)
+london_coef_a2l   = input.float(0.250, "Coef A2L London (Long Amp2)",  minval=0.01, maxval=1.0, step=0.005, group=grp_london)
+london_coef_a2s   = input.float(0.275, "Coef A2S London (Short Amp2)", minval=0.01, maxval=1.0, step=0.005, group=grp_london)
+
+// ── Session NY AM ─────────────────────────────────────────────────────────────
+// Debut : ny_hour:ny_min (defaut 15h30 timezone amp_tz_id, "Paris" par defaut).
+// Fin   : implicite = debut de la session NY PM (nypm_startH:nypm_startMin).
+grp_sess         = "Session NY AM"
+ny_hour          = input.int(15, "Heure debut NY AM",   minval=0, maxval=23, group=grp_sess, inline="nyam_start")
+ny_min           = input.int(30, "Minute debut NY AM",  minval=0, maxval=59, group=grp_sess, inline="nyam_start")
+nyam_restart     = input.bool(true, "Restart recherche Amp1 au debut de NY AM", group=grp_sess)
+nyam_coef_a1l    = input.float(0.390, "Coef A1L NY AM (Long Amp1)",  minval=0.01, maxval=1.0, step=0.005, group=grp_sess)
+nyam_coef_a1s    = input.float(0.330, "Coef A1S NY AM (Short Amp1)", minval=0.01, maxval=1.0, step=0.005, group=grp_sess)
+nyam_coef_a2l    = input.float(0.420, "Coef A2L NY AM (Long Amp2)",  minval=0.01, maxval=1.0, step=0.005, group=grp_sess)
+nyam_coef_a2s    = input.float(0.255, "Coef A2S NY AM (Short Amp2)", minval=0.01, maxval=1.0, step=0.005, group=grp_sess)
+
+// ── Efficience NY (filtre Kaufman + alertes) ─────────────────────────────────
+// Filtre rattache a la session NY AM : ancrage a l'open de la 1ere M1
+// dont l'heure locale >= ny_hour:ny_min (= debut NY AM).
+grp_eff           = "Efficience NY"
+eff_enabled       = input.bool(true, "Activer le filtre d'efficience", group=grp_eff)
+eff_nogo_thr      = input.float(0.55, "Seuil No-Go (15h45 par defaut)", minval=0.0, maxval=1.0, step=0.01, group=grp_eff)
+eff_solder_thr    = input.float(0.40, "Seuil Solder (16h15 par defaut)", minval=0.0, maxval=1.0, step=0.01, group=grp_eff)
+eff_nogo_h        = input.int(15, "Heure No-Go", minval=0, maxval=23, group=grp_eff, inline="nogo")
+eff_nogo_min      = input.int(45, "Minute",     minval=0, maxval=59, group=grp_eff, inline="nogo")
+eff_solder_h      = input.int(16, "Heure Solder", minval=0, maxval=23, group=grp_eff, inline="solder")
+eff_solder_min    = input.int(15, "Minute",      minval=0, maxval=59, group=grp_eff, inline="solder")
+
+// ── Session NY PM ─────────────────────────────────────────────────────────────
+// Debut : nypm_startH:nypm_startMin (defaut 18h30) - sert aussi de fin pour NY AM.
+// Fin   : nypm_endH:nypm_endMin (defaut 22h00) - sert aussi de fin de fenetre globale.
+// Hors fenetre globale (entre fin NY PM et debut London) : aucune marque tracee.
+grp_nypm          = "Session NY PM"
+nypm_startH       = input.int(18, "Heure debut NY PM",  minval=0, maxval=23, group=grp_nypm, inline="nypm_start")
+nypm_startMin     = input.int(30, "Minute debut NY PM", minval=0, maxval=59, group=grp_nypm, inline="nypm_start")
+nypm_endH         = input.int(22, "Heure fin NY PM",    minval=0, maxval=24, group=grp_nypm, inline="nypm_end")
+nypm_endMin       = input.int(0,  "Minute fin NY PM",   minval=0, maxval=59, group=grp_nypm, inline="nypm_end")
+nypm_restart      = input.bool(true, "Restart recherche Amp1 au debut de NY PM", group=grp_nypm)
+nypm_coef_a1l     = input.float(0.325, "Coef A1L NY PM (Long Amp1)",  minval=0.01, maxval=1.0, step=0.005, group=grp_nypm)
+nypm_coef_a1s     = input.float(0.225, "Coef A1S NY PM (Short Amp1)", minval=0.01, maxval=1.0, step=0.005, group=grp_nypm)
+nypm_coef_a2l     = input.float(0.400, "Coef A2L NY PM (Long Amp2)",  minval=0.01, maxval=1.0, step=0.005, group=grp_nypm)
+nypm_coef_a2s     = input.float(0.300, "Coef A2S NY PM (Short Amp2)", minval=0.01, maxval=1.0, step=0.005, group=grp_nypm)
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 grp_dash  = "Dashboard"
 show_dash = input.bool(true, "Afficher le dashboard", group=grp_dash)
 
 // ── Calcul Amp. Reco ──────────────────────────────────────────────────────────
+// Le nombre de jours est commun aux 3 sessions ; les 4 coefs par session sont
+// dans leurs groupes respectifs ci-dessus.
 grp_reco         = "Calcul Amp. Reco"
 reco_n_days      = input.int(5,    "Nb jours pour la somme",  minval=1, maxval=30, group=grp_reco)
-reco_coef_a1l    = input.float(0.390, "Coef A1L (Long Amp1)",  minval=0.01, maxval=1.0, step=0.005, group=grp_reco)
-reco_coef_a1s    = input.float(0.330, "Coef A1S (Short Amp1)", minval=0.01, maxval=1.0, step=0.005, group=grp_reco)
-reco_coef_a2l    = input.float(0.420, "Coef A2L (Long Amp2)",  minval=0.01, maxval=1.0, step=0.005, group=grp_reco)
-reco_coef_a2s    = input.float(0.255, "Coef A2S (Short Amp2)", minval=0.01, maxval=1.0, step=0.005, group=grp_reco)
 
 // ── Niveaux (toggle maitre pour toutes les lignes Fibo et Day) ───────────────
 grp_lvl     = "Niveaux (Fibo et Day lines)"
@@ -392,30 +498,10 @@ amp_leftBars    = input.int(3,      "Swing left bars - mode Bougies",  minval=1,
 amp_rightBars   = input.int(3,      "Swing right bars - mode Bougies", minval=1, maxval=20, group=grp_marks)
 amp_leftDurMin  = input.int(15,     "Duree avant (min) - mode Duree",  minval=1, maxval=120, group=grp_marks)
 amp_rightDurMin = input.int(15,     "Duree apres (min) - mode Duree",  minval=0, maxval=120, group=grp_marks)
-amp_startHour   = input.int(7,      "Debut h",                        minval=0, maxval=23, group=grp_marks, inline="m_start")
-amp_startMinute = input.int(0,      "min",                            minval=0, maxval=59, group=grp_marks, inline="m_start")
-amp_endHour     = input.int(22,     "Fin   h",                        minval=0, maxval=24, group=grp_marks, inline="m_end")
-amp_endMinute   = input.int(0,      "min",                            minval=0, maxval=59, group=grp_marks, inline="m_end")
-amp_tz          = input.string("Paris", "Timezone fenetre",
-                      options=["New York","Chicago","Los Angeles","London","Paris","Berlin","Tokyo","Hong Kong","Sydney","UTC"],
-                      group=grp_marks)
 markerWidthBars = input.float(2,    "Largeur marque (bars)",          minval=0.5, step=0.1, group=grp_marks)
 amp_lineWidth   = input.int(2,      "Epaisseur trait",                minval=1, maxval=10, group=grp_marks)
-amp_preNyAdjust = input.bool(true,  "Ajuster les amplitudes avant NY AM", group=grp_marks)
-amp_preNyCoef   = input.float(0.5,  "Coef pre-NY AM (applique a Amp1 et Amp2)", minval=0.01, step=0.05, group=grp_marks)
-amp_restartOnSessions = input.bool(false, "Restart recherche Amp1 a chaque session (debut fenetre et NY AM)", group=grp_marks)
 amp_bullColor   = input.color(color.new(#00C853, 10), "Couleur haussiere (signal achat)", group=grp_marks)
 amp_bearColor   = input.color(color.new(#FF1744, 10), "Couleur baissiere (signal vente)", group=grp_marks)
-
-// ── Efficience NY (filtre Kaufman + alertes) ─────────────────────────────────
-grp_eff           = "Efficience NY"
-eff_enabled       = input.bool(true, "Activer le filtre d'efficience", group=grp_eff)
-eff_nogo_thr      = input.float(0.55, "Seuil No-Go (15h45 Paris)", minval=0.0, maxval=1.0, step=0.01, group=grp_eff)
-eff_solder_thr    = input.float(0.40, "Seuil Solder (16h15 Paris)", minval=0.0, maxval=1.0, step=0.01, group=grp_eff)
-eff_nogo_h        = input.int(15, "Heure No-Go", minval=0, maxval=23, group=grp_eff, inline="nogo")
-eff_nogo_min      = input.int(45, "Minute",     minval=0, maxval=59, group=grp_eff, inline="nogo")
-eff_solder_h      = input.int(16, "Heure Solder", minval=0, maxval=23, group=grp_eff, inline="solder")
-eff_solder_min    = input.int(15, "Minute",      minval=0, maxval=59, group=grp_eff, inline="solder")
 
 // === Etat efficience Kaufman - filtre NY ===
 // Ancrage a l'open de la 1ere M1 de la session NY = 15h30 Paris.
@@ -446,11 +532,22 @@ var EffState eff_s = EffState.new(
      solder_done  = false,
      dayKey       = 0)
 
-// Effective L/S amp1/amp2 values (overridden if Auto NY is enabled, apres dashboard reco)
-amp1L_eff = amp1L_Pts
-amp1S_eff = amp1S_Pts
-amp2L_eff = amp2L_Pts
-amp2S_eff = amp2S_Pts
+// Effective L/S amp1/amp2 values per session, in points (= prix / amp_pointSize).
+// Initialisees avec les 4 inputs manuels (memes valeurs pour les 3 sessions),
+// surchargees apres calcul du dashboard si Auto NY est coche, ou les 12 valeurs
+// deviennent round(coef_session * avg_reco) / amp_pointSize.
+amp_london_a1l_eff = amp1L_Pts
+amp_london_a1s_eff = amp1S_Pts
+amp_london_a2l_eff = amp2L_Pts
+amp_london_a2s_eff = amp2S_Pts
+amp_nyam_a1l_eff   = amp1L_Pts
+amp_nyam_a1s_eff   = amp1S_Pts
+amp_nyam_a2l_eff   = amp2L_Pts
+amp_nyam_a2s_eff   = amp2S_Pts
+amp_nypm_a1l_eff   = amp1L_Pts
+amp_nypm_a1s_eff   = amp1S_Pts
+amp_nypm_a2l_eff   = amp2L_Pts
+amp_nypm_a2s_eff   = amp2S_Pts
 
 // ── Detection heure d'ete Paris (CEST = GMT+2) ────────────────────────────────
 // Dernier dimanche de mars -> dernier dimanche d'octobre
@@ -1106,19 +1203,56 @@ amp_ny_fort   = ratio_fort   * use_amp   // amplitude NY estimee mini - percenti
 // Diviseur = nombre de jours NY reellement charges + 1 (le "+1" = amp_ny_faible).
 avg_reco = (amp_ny_faible + sum_5d_ny) / (hist_size + 1)
 
-amp_reco_a1l = math.round(reco_coef_a1l * avg_reco)
-amp_reco_a1s = math.round(reco_coef_a1s * avg_reco)
-amp_reco_a2l = math.round(reco_coef_a2l * avg_reco)
-amp_reco_a2s = math.round(reco_coef_a2s * avg_reco)
+// Amp. Reco par session : 4 coefs distincts par session, appliques a la meme
+// moyenne avg_reco. Affiches en points sur le dashboard, convertis en unite
+// de prix dans le greffon via amp_pointSize.
+amp_reco_london_a1l = math.round(london_coef_a1l * avg_reco)
+amp_reco_london_a1s = math.round(london_coef_a1s * avg_reco)
+amp_reco_london_a2l = math.round(london_coef_a2l * avg_reco)
+amp_reco_london_a2s = math.round(london_coef_a2s * avg_reco)
+amp_reco_nyam_a1l   = math.round(nyam_coef_a1l * avg_reco)
+amp_reco_nyam_a1s   = math.round(nyam_coef_a1s * avg_reco)
+amp_reco_nyam_a2l   = math.round(nyam_coef_a2l * avg_reco)
+amp_reco_nyam_a2s   = math.round(nyam_coef_a2s * avg_reco)
+amp_reco_nypm_a1l   = math.round(nypm_coef_a1l * avg_reco)
+amp_reco_nypm_a1s   = math.round(nypm_coef_a1s * avg_reco)
+amp_reco_nypm_a2l   = math.round(nypm_coef_a2l * avg_reco)
+amp_reco_nypm_a2s   = math.round(nypm_coef_a2s * avg_reco)
 
-// Auto NY : surcharge les 4 amplitudes du greffon avec les Amp. Reco du dashboard
-//   L = Long  (marque verte / signal achat)
-//   S = Short (marque rouge / signal vente)
+// Auto NY : surcharge les 12 amplitudes du greffon avec les Amp. Reco par session.
+// Sinon, les 12 valeurs gardent les inputs manuels (memes pour les 3 sessions).
+//   L = Long  (marque verte / signal achat) -> direction "down"
+//   S = Short (marque rouge / signal vente) -> direction "up"
 if amp_auto_ny
-    amp1L_eff := amp_reco_a1l / amp_pointSize
-    amp1S_eff := amp_reco_a1s / amp_pointSize
-    amp2L_eff := amp_reco_a2l / amp_pointSize
-    amp2S_eff := amp_reco_a2s / amp_pointSize
+    amp_london_a1l_eff := amp_reco_london_a1l / amp_pointSize
+    amp_london_a1s_eff := amp_reco_london_a1s / amp_pointSize
+    amp_london_a2l_eff := amp_reco_london_a2l / amp_pointSize
+    amp_london_a2s_eff := amp_reco_london_a2s / amp_pointSize
+    amp_nyam_a1l_eff   := amp_reco_nyam_a1l   / amp_pointSize
+    amp_nyam_a1s_eff   := amp_reco_nyam_a1s   / amp_pointSize
+    amp_nyam_a2l_eff   := amp_reco_nyam_a2l   / amp_pointSize
+    amp_nyam_a2s_eff   := amp_reco_nyam_a2s   / amp_pointSize
+    amp_nypm_a1l_eff   := amp_reco_nypm_a1l   / amp_pointSize
+    amp_nypm_a1s_eff   := amp_reco_nypm_a1s   / amp_pointSize
+    amp_nypm_a2l_eff   := amp_reco_nypm_a2l   / amp_pointSize
+    amp_nypm_a2s_eff   := amp_reco_nypm_a2s   / amp_pointSize
+
+// Determination de la session courante (pour dashboard + greffon).
+// Bornes : London = [london_start, ny_am_start), NY AM = [ny_am_start, nypm_start),
+// NY PM = [nypm_start, nypm_end). Hors session entre nypm_end et london_start
+// (24h/24 sur instruments comme NQ Futures).
+int amp_now_mins      = hour(time, amp_tz_id) * 60 + minute(time, amp_tz_id)
+int london_start_mins = london_startH * 60 + london_startMin
+int nyam_start_mins   = ny_hour       * 60 + ny_min
+int nypm_start_mins   = nypm_startH   * 60 + nypm_startMin
+int nypm_end_mins     = nypm_endH     * 60 + nypm_endMin
+
+bool   amp_in_london     = amp_now_mins >= london_start_mins and amp_now_mins < nyam_start_mins
+bool   amp_in_nyam       = amp_now_mins >= nyam_start_mins   and amp_now_mins < nypm_start_mins
+bool   amp_in_nypm       = amp_now_mins >= nypm_start_mins   and amp_now_mins < nypm_end_mins
+bool   amp_in_any        = amp_in_london or amp_in_nyam or amp_in_nypm
+// Raccourci 3 caracteres pour l'affichage compact du dashboard.
+string amp_current_label = amp_in_london ? "LON" : amp_in_nyam ? "NYA" : amp_in_nypm ? "NYP" : "HS"
 
 // ── Live preview efficience (avant le dashboard) ─────────────────────────────
 // Sur les charts > M1, request.security_lower_tf delivre les M1 batches a la
@@ -1166,11 +1300,16 @@ if barstate.islast and show_dash
     frz_str_s = frozen ? "Fige" : "Dynamique"
     frz_col_s = frozen ? color.new(#3fb950, 0) : color.new(#c99a2c, 0)
 
-    // Valeurs effectives affichees (en points / unites de prix)
-    a1l_disp = math.round(amp1L_eff * amp_pointSize)
-    a1s_disp = math.round(amp1S_eff * amp_pointSize)
-    a2l_disp = math.round(amp2L_eff * amp_pointSize)
-    a2s_disp = math.round(amp2S_eff * amp_pointSize)
+    // Valeurs effectives affichees pour la session COURANTE (en points / unites
+    // de prix). Hors session : on affiche les valeurs NY AM par defaut.
+    float a1l_active = amp_in_london ? amp_london_a1l_eff : amp_in_nypm ? amp_nypm_a1l_eff : amp_nyam_a1l_eff
+    float a1s_active = amp_in_london ? amp_london_a1s_eff : amp_in_nypm ? amp_nypm_a1s_eff : amp_nyam_a1s_eff
+    float a2l_active = amp_in_london ? amp_london_a2l_eff : amp_in_nypm ? amp_nypm_a2l_eff : amp_nyam_a2l_eff
+    float a2s_active = amp_in_london ? amp_london_a2s_eff : amp_in_nypm ? amp_nypm_a2s_eff : amp_nyam_a2s_eff
+    a1l_disp = math.round(a1l_active * amp_pointSize)
+    a1s_disp = math.round(a1s_active * amp_pointSize)
+    a2l_disp = math.round(a2l_active * amp_pointSize)
+    a2s_disp = math.round(a2s_active * amp_pointSize)
 
     // Valeurs efficience pour les colonnes No-Go / Solder
     // Affichage live tant que le gate n'est pas atteint, puis fige a la valeur du gate.
@@ -1219,10 +1358,11 @@ if barstate.islast and show_dash
     table.cell(ts, 1, 3, str.tostring(math.round(amp_ny_fort))   + " pts",   text_color=color.new(#ff7b72, 0), text_size=size.small)
     table.cell(ts, 2, 3, str.tostring(math.round(amp_ny_faible)) + " pts",   text_color=color.new(#3fb950, 0), text_size=size.small)
 
-    // Row 4 : header "Long" / "Short"
-    table.cell(ts, 0, 4, "Amp. Reco", text_color=color.gray,            text_size=size.small)
-    table.cell(ts, 1, 4, "Long",      text_color=color.new(#3fb950, 0), text_size=size.small)
-    table.cell(ts, 2, 4, "Short",     text_color=color.new(#ff7b72, 0), text_size=size.small)
+    // Row 4 : header "Long" / "Short" + nom de la session courante
+    // (les valeurs A1/A2 ci-dessous changent selon la session active).
+    table.cell(ts, 0, 4, "Amp. Reco - " + amp_current_label, text_color=color.gray,            text_size=size.small)
+    table.cell(ts, 1, 4, "Long",                             text_color=color.new(#3fb950, 0), text_size=size.small)
+    table.cell(ts, 2, 4, "Short",                            text_color=color.new(#ff7b72, 0), text_size=size.small)
 
     // Row 5 : A1 (label + A1L + A1S)
     table.cell(ts, 0, 5, "A1",                              text_color=color.gray,            text_size=size.small)
@@ -1234,10 +1374,13 @@ if barstate.islast and show_dash
     table.cell(ts, 1, 6, str.tostring(a2l_disp) + " pts",   text_color=color.new(#3fb950, 0), text_size=size.small)
     table.cell(ts, 2, 6, str.tostring(a2s_disp) + " pts",   text_color=color.new(#ff7b72, 0), text_size=size.small)
 
-    // Row 7 : header No-Go / Solder
-    table.cell(ts, 0, 7, "",       text_size=size.small)
-    table.cell(ts, 1, 7, "No-Go",  text_color=color.gray, text_size=size.small)
-    table.cell(ts, 2, 7, "Solder", text_color=color.gray, text_size=size.small)
+    // Row 7 : Source des amplitudes (col 0) + header No-Go / Solder (col 1+2).
+    // "Manuel" si inputs A*_Pts utilises tels quels, "Auto" si Amp. Reco calculee.
+    string amp_source_str = amp_auto_ny ? "Auto" : "Manuel"
+    color  amp_source_col = amp_auto_ny ? color.new(#3fb950, 0) : color.new(#c99a2c, 0)
+    table.cell(ts, 0, 7, amp_source_str, text_color=amp_source_col, text_size=size.small)
+    table.cell(ts, 1, 7, "No-Go",        text_color=color.gray,     text_size=size.small)
+    table.cell(ts, 2, 7, "Solder",       text_color=color.gray,     text_size=size.small)
 
     // Row 8 : Filtre efficience (label + valeur No-Go + valeur Solder)
     table.cell(ts, 0, 8, "Filtre efficience", text_color=color.gray, text_size=size.small)
@@ -1270,8 +1413,9 @@ type AmpState
     float  swingHigh       // dernier swing high detecte - ref. trigger baissier
     int    swingHighTime
     int    lastDayKey
-    bool   prevInWindow    // pour detecter la transition d'entree dans la fenetre
-    bool   prevInNyAm      // pour detecter le passage de l'open NY AM
+    bool   prevInLondon    // detecter la transition d'entree dans London
+    bool   prevInNyAm      // detecter la transition d'entree dans NY AM
+    bool   prevInNyPm      // detecter la transition d'entree dans NY PM
 
 var AmpState amp_s = AmpState.new(
      phase           = "searching",
@@ -1288,8 +1432,9 @@ var AmpState amp_s = AmpState.new(
      swingHigh       = na,
      swingHighTime   = na,
      lastDayKey      = 0,
-     prevInWindow    = false,
-     prevInNyAm      = false)
+     prevInLondon    = false,
+     prevInNyAm      = false,
+     prevInNyPm      = false)
 
 // === Historique des bougies M1 (buffer local pour la detection swing) ===
 var array<float> amp_hist_h = array.new<float>()
@@ -1381,35 +1526,42 @@ f_processAmpBar(float h, float l, int t) =>
         amp_s.currentPath     := "amp2"
     amp_s.lastDayKey := dk
 
-    // 3) Calcul des fenetres horaires (utilises pour reset session + state machine)
-    int minutesNow = hour(t, amp_tz_id) * 60 + minute(t, amp_tz_id)
-    int startMins  = amp_startHour * 60 + amp_startMinute
-    int endMins    = amp_endHour   * 60 + amp_endMinute
-    bool inWindow  = minutesNow >= startMins and minutesNow < endMins
+    // 3) Detection des 3 sessions horaires + fenetre globale (= union des 3)
+    // Bornes en minutes locales dans amp_tz_id :
+    //   London : [london_start, ny_am_start)
+    //   NY AM  : [ny_am_start, nypm_start)   (fin = debut NY PM, pas de gap)
+    //   NY PM  : [nypm_start,  nypm_end)
+    int minutesNow      = hour(t, amp_tz_id) * 60 + minute(t, amp_tz_id)
+    int londonStartMins = london_startH * 60 + london_startMin
+    int nyAmStartMins   = ny_hour       * 60 + ny_min
+    int nyPmStartMins   = nypm_startH   * 60 + nypm_startMin
+    int nyPmEndMins     = nypm_endH     * 60 + nypm_endMin
 
-    int  localMins = hour(t, amp_tz_id) * 60 + minute(t, amp_tz_id)
-    int  nyAmMins  = ny_hour * 60 + ny_min
-    bool inNyAm    = localMins >= nyAmMins
+    bool inLondon = minutesNow >= londonStartMins and minutesNow < nyAmStartMins
+    bool inNyAm   = minutesNow >= nyAmStartMins   and minutesNow < nyPmStartMins
+    bool inNyPm   = minutesNow >= nyPmStartMins   and minutesNow < nyPmEndMins
+    bool inWindow = inLondon or inNyAm or inNyPm
 
-    // 3b) Reset session optionnel : si la case est cochee, on relance une
-    // recherche Amp1 fraiche a chaque ouverture de session (debut fenetre + NY AM).
-    // On garde le dernier swing low/high detecte comme reference : un mouvement
-    // commence juste avant l'ouverture continue de compter dans le calcul Amp1.
-    if amp_restartOnSessions
-        bool windowOpening = inWindow and not amp_s.prevInWindow
-        bool nyAmOpening   = inNyAm   and not amp_s.prevInNyAm
-        if windowOpening or nyAmOpening
-            amp_s.phase           := "searching"
-            amp_s.direction       := na
-            amp_s.origin          := na
-            amp_s.refExtreme      := na
-            amp_s.oppExtreme      := na
-            amp_s.localOpp        := na
-            amp_s.recoveryExt     := na
-            amp_s.retracementSeen := false
-            amp_s.currentPath     := "amp2"
-    amp_s.prevInWindow := inWindow
+    // 3b) Reset session par session : un toggle distinct par session, coches par
+    // defaut. On garde le dernier swing low/high detecte comme reference : un
+    // mouvement amorce juste avant l'ouverture continue de compter dans le
+    // calcul Amp1.
+    bool londonOpening = london_restart and inLondon and not amp_s.prevInLondon
+    bool nyAmOpening   = nyam_restart   and inNyAm   and not amp_s.prevInNyAm
+    bool nyPmOpening   = nypm_restart   and inNyPm   and not amp_s.prevInNyPm
+    if londonOpening or nyAmOpening or nyPmOpening
+        amp_s.phase           := "searching"
+        amp_s.direction       := na
+        amp_s.origin          := na
+        amp_s.refExtreme      := na
+        amp_s.oppExtreme      := na
+        amp_s.localOpp        := na
+        amp_s.recoveryExt     := na
+        amp_s.retracementSeen := false
+        amp_s.currentPath     := "amp2"
+    amp_s.prevInLondon := inLondon
     amp_s.prevInNyAm   := inNyAm
+    amp_s.prevInNyPm   := inNyPm
 
     // 4) Detection swing 24h/24 : on garde toujours le dernier swing low/high
     // detecte, meme pendant la phase tracking. Au prochain passage en searching
@@ -1486,13 +1638,14 @@ f_processAmpBar(float h, float l, int t) =>
                 amp_s.swingHigh     := pivotHigh
                 amp_s.swingHighTime := pivotTime
 
-    // 5) Ajustement pre-NY AM : si actif et avant l'heure NY AM (Paris, ref. indicateur),
-    // on applique le coef aux 4 amplitudes L/S.
-    float preNyMult = (amp_preNyAdjust and not inNyAm) ? amp_preNyCoef : 1.0
-    float amp1L_now = amp1L_eff * preNyMult
-    float amp1S_now = amp1S_eff * preNyMult
-    float amp2L_now = amp2L_eff * preNyMult
-    float amp2S_now = amp2S_eff * preNyMult
+    // 5) Selection des 4 amplitudes effectives selon la session courante.
+    // Hors session (entre fin NY PM et debut London) on garde les valeurs NY AM
+    // comme fallback : la state machine peut continuer a fonctionner mais les
+    // marques ne sont pas dessinees (gate inWindow).
+    float amp1L_now = inLondon ? amp_london_a1l_eff : inNyPm ? amp_nypm_a1l_eff : amp_nyam_a1l_eff
+    float amp1S_now = inLondon ? amp_london_a1s_eff : inNyPm ? amp_nypm_a1s_eff : amp_nyam_a1s_eff
+    float amp2L_now = inLondon ? amp_london_a2l_eff : inNyPm ? amp_nypm_a2l_eff : amp_nyam_a2l_eff
+    float amp2S_now = inLondon ? amp_london_a2s_eff : inNyPm ? amp_nypm_a2s_eff : amp_nyam_a2s_eff
 
     // State machine 24h/24 pour rester coherente quelle que soit l'heure de
     // debut de fenetre. Les marques visuelles sont gatees par inWindow.
