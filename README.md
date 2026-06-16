@@ -346,6 +346,77 @@ Les 2 alertes (`Efficience NO-GO` et `Efficience SOLDER`) se configurent via le 
 
 ## Changelog
 
+### v3.0 - 2026-06-16
+
+**Refonte majeure : nouvelle formule `avg` v2 + coefficients v3 par session.** Saut de version 1.20 → 3.0 pour aligner sur la version de la formule de base (socle juin 2026).
+
+#### Nouvelle formule `avg` v2
+
+L'ancienne formule unique (`avg_reco = (P90[dow] × use_amp + Σ5_NY) / (N+1)`) est **abandonnée**. Elle mélangeait une pré-amplitude courte avec 5 amplitudes de session complète (hétérogène), et la table P90 par jour de semaine était figée, non adaptative.
+
+Le système v3 calcule **deux bases distinctes** :
+
+| Base         | Sert pour                | Calcul                                 |
+|--------------|--------------------------|----------------------------------------|
+| `avg_ny`     | sessions NY AM ET NY PM  | `médiane(5j ny_amp) × coef_borné`      |
+| `avg_london` | session London           | `médiane(5j london_amp) × coef_borné`  |
+
+Avec `coef_borné = max(0.5, min(2.0, preamp(J) / médiane(5j preamp)))`. Le bornage [0.5, 2.0] neutralise les jours d'annonce sans étouffer la modulation normale.
+
+**4 briques d'amplitude** trackées en heure Paris (DST géré) :
+
+| Brique          | Fenêtre Paris | Sert pour            |
+|-----------------|---------------|----------------------|
+| `ny_amp`        | 15h30 → 22h00 | base de `avg_ny`     |
+| `preny_amp`     | 00h00 → 15h29 | coef de `avg_ny`     |
+| `london_amp`    | 08h00 → 14h00 | base de `avg_london` |
+| `prelondon_amp` | 00h00 → 07h59 | coef de `avg_london` |
+
+**Calcul figé en début de session** : `avg_london` recalculé à 08h00 (fermeture prelondon), `avg_ny` recalculé à 15h30 (fermeture preny). Implémentation via `array.median()` natif Pine v6.
+
+**Warmup** : si moins de 5 jours d'historique disponibles, `avg = na` et le mode Auto NY tombe en fallback sur les inputs manuels `A1L / A1S / A2L / A2S`.
+
+#### Coefficients v3 par session × sens (entrée / espacement)
+
+Sémantique : **entrée** = profondeur de la 1ʳᵉ entrée contrarienne (A1) ; **espacement** = distance entre pattes successives du multi-entrée (A2).
+
+| Session    | Base         | A1L (entrée long) | A2L (esp. long) | A1S (entrée short) | A2S (esp. short) |
+|------------|--------------|-------------------|-----------------|--------------------|------------------|
+| **London** | `avg_london` | 0.250             | 0.400           | 0.250              | 0.300            |
+| **NY AM**  | `avg_ny`     | 0.350             | 0.450           | 0.300              | 0.300            |
+| **NY PM**  | `avg_ny`     | 0.150             | 0.200           | 0.200              | 0.250            |
+
+#### Bornes par défaut NY AM / NY PM anticipées
+
+Les **valeurs par défaut des débuts de session NY AM et NY PM sont avancées de 2h** par rapport à leurs heures "officielles" :
+
+| Session | Heure officielle | **Défaut v3.0**  |
+|---------|------------------|------------------|
+| NY AM   | 15h30 Paris      | **13h30 Paris**  |
+| NY PM   | 18h30 Paris      | **17h30 Paris**  |
+
+**Objectif** : basculer sur les coefs de la session à venir **AVANT son ouverture réelle** pour absorber les éventuels mouvements forts Pre-NY (annonces économiques, news macro, accumulation institutionnelle en début d'après-midi). Les marques affichées entre 13h30 et 15h30 utilisent donc les coefs **NY AM** (au lieu de London), tout en restant calculées sur `avg_ny` du jour précédent puisque la formule v2 reste figée sur 15h30.
+
+**Important** : la **formule `avg` v2 ne change pas** — les briques `preny_amp` (0h → 15h29) et `ny_amp` (15h30 → 22h00) restent calibrées sur les heures "officielles" 15h30/22h pour rester comparables au dataset de référence. Seul le **moment du basculement des coefs dans le greffon** est anticipé.
+
+Si tu veux coller strictement aux fenêtres standard, repasser à 15h30 / 18h30 dans les inputs `Heure debut NY AM` et `Heure debut NY PM`.
+
+#### Filtre Efficience NY : SUPPRIMÉ
+
+Le filtre Kaufman (No-Go / Solder + 2 alertes) est supprimé de l'indicateur. Tous les composants associés (groupe d'inputs, UDT `EffState`, fonction `f_processEffBar`, live preview, lignes dashboard, alertes) sont retirés. Le calcul était peu utilisé et compliquait inutilement le code.
+
+#### Dashboard : 7 lignes (était 9)
+
+- **Lignes supprimées** : header No-Go/Solder + Filtre efficience.
+- **Ligne 1** : la cellule en col 2 (était vide) affiche maintenant `Auto` (vert) ou `Manuel` (orange) selon le mode Auto NY (déplacée depuis la ligne 7 supprimée).
+- **Ligne 3** : remplacement de `Amp. NY min/max` (P50/P90) par `Avg` avec `avg_london` en col 1 et `avg_ny` en col 2. Affiche `...` pendant le warmup.
+
+#### Autres changements
+
+- Suppression de l'input `Nb jours pour la somme` (`reco_n_days`) : `NWIN` est hardcodé à 5 dans la formule v2.
+- Suppression des tables `p50r` / `p75r` / `p90r` (caduques).
+- Les labels des 12 coefs sont enrichis pour indiquer la sémantique : `Coef A1L London (entrée long)`, `Coef A2L NY AM (espacement long)`, etc.
+
 ### v1.20 - 2026-06-14
 
 Greffon : 3 sessions horaires distinctes avec coefficients Auto NY indépendants.

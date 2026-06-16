@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 1.20
+// Version: 3.0
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -38,6 +38,85 @@
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v3.0 - 2026-06-16
+//     - REFONTE MAJEURE : nouvelle formule avg v2 + coefficients v3 par session.
+//       Saut de version 1.20 -> 3.0 pour aligner sur la version de la formule
+//       de base (socle juin 2026, cf. REFERENCE_socle_donnees.md).
+//
+//     === Formule avg v2 (deux bases distinctes au lieu d'une) ===
+//     L'ancienne formule (avg_reco = (P90[dow]*use_amp + somme 5d ny) / (N+1))
+//     est ABANDONNEE. Elle melangeait une pre-amplitude courte avec 5 amplitudes
+//     de session complete (heterogene), et la table P90 par jour de semaine
+//     etait figee, non adaptative.
+//
+//     Nouvelle formule (identique pour les 2 bases) :
+//       base(J)    = MEDIANE(amplitude_session des 5 jours precedents)
+//       coef(J)    = preamp(J) / MEDIANE(preamp des 5 jours precedents)
+//       coef_borne = max(0.5, min(2.0, coef(J)))
+//       avg(J)     = base(J) * coef_borne
+//
+//     Deux bases distinctes :
+//       avg_ny     -> sessions NY AM ET NY PM (base commune NY)
+//       avg_london -> session London (base propre)
+//
+//     Briques d'amplitude (high - low en heure Paris, DST gere) :
+//       ny_amp         15h30 - 22h00  (pour base_ny)
+//       preny_amp      00h00 - 15h29  (pour coef_ny)
+//       london_amp     08h00 - 14h00  (pour base_london)
+//       prelondon_amp  00h00 - 07h59  (pour coef_london)
+//
+//     Calcul fige en debut de session :
+//       avg_london recalcule a 08h00 (fermeture prelondon -> ouverture London)
+//       avg_ny     recalcule a 15h30 (fermeture preny     -> ouverture NY AM)
+//     Le calcul utilise array.median() (natif Pine v6).
+//     Warmup : si moins de 5 jours d'historique disponibles, avg = na et le
+//     mode Auto NY tombe en fallback sur les inputs manuels A1L/A1S/A2L/A2S.
+//
+//     === Coefficients v3 par session et par sens (entree / espacement) ===
+//     Semantique :
+//       entree     = profondeur de la 1ere entree contrarienne (A1 du greffon)
+//       espacement = distance entre pattes successives du multi-entree (A2)
+//
+//     Valeurs par defaut v3 :
+//                  Long entree | Long esp. | Short entree | Short esp.
+//       London   :    0.250    |   0.400   |    0.250     |   0.300
+//       NY AM    :    0.350    |   0.450   |    0.300     |   0.300
+//       NY PM    :    0.150    |   0.200   |    0.200     |   0.250
+//
+//     Suppression de la table p90r/p75r/p50r par jour de semaine (caduque).
+//     Suppression de l'input "Nb jours pour la somme" (reco_n_days) : NWIN
+//     est hardcode a 5 dans la formule v2.
+//
+//     === Filtre Efficience NY : SUPPRIME ===
+//     Le filtre Kaufman (No-Go / Solder + 2 alertes) est supprime de l'indicateur.
+//     Tous les composants associes (group d'inputs, UDT EffState, fonction
+//     f_processEffBar, live preview, lignes dashboard) sont retires. Le calcul
+//     etait peu utilise et compliquait inutilement le code.
+//
+//     === Bornes par defaut NY AM / NY PM anticipees ===
+//     Les valeurs par defaut des debuts NY AM et NY PM sont avancees de 2h
+//     par rapport a leurs heures "officielles" :
+//       NY AM : defaut 13h30 (au lieu de 15h30)
+//       NY PM : defaut 17h30 (au lieu de 18h30)
+//     OBJECTIF : on bascule sur les coefs de la session a venir AVANT son
+//     ouverture reelle pour absorber les eventuels mouvements forts Pre-NY
+//     (annonces, news, accumulation institutionnelle). Les marques affichees
+//     entre 13h30 et 15h30 utilisent donc les coefs NY AM (avec avg_ny calcule
+//     a 15h30 du jour J-1 puisque la formule v2 reste figee).
+//     IMPORTANT : la formule avg v2 ne change PAS - les briques preny_amp
+//     (0h-15h29) et ny_amp (15h30-22h) restent calibrees sur les heures
+//     "officielles" 15h30/22h pour rester comparables au dataset de reference.
+//     Le user peut remettre les valeurs officielles dans les inputs s'il veut
+//     coller strictement aux fenetres standard.
+//
+//     === Dashboard : 7 lignes (etait 9) ===
+//     Lignes supprimees : header No-Go/Solder + Filtre efficience.
+//     Ligne 1 : la cellule en col 2 (etait vide) affiche maintenant
+//       "Auto" (vert) ou "Manuel" (orange) selon le mode amp_auto_ny.
+//     Ligne 3 : remplacement de "Amp. NY min/max" (P50/P90) par "Avg" avec
+//       avg_london en col 1 et avg_ny en col 2 (les 2 bases de la formule v2).
+//       Affiche "..." pendant le warmup (< 5 jours d'historique).
+//
 //   v1.20 - 2026-06-14
 //     - Greffon : 3 sessions horaires distinctes (London, NY AM, NY PM)
 //       avec coefficients Auto NY independants par session. La selection
@@ -324,59 +403,48 @@ grp_london        = "Session London"
 london_startH     = input.int(8, "Heure debut London",  minval=0, maxval=23, group=grp_london, inline="london_start")
 london_startMin   = input.int(0, "Minute debut London", minval=0, maxval=59, group=grp_london, inline="london_start")
 london_restart    = input.bool(true, "Restart recherche Amp1 au debut de London", group=grp_london)
-london_coef_a1l   = input.float(0.175, "Coef A1L London (Long Amp1)",  minval=0.01, maxval=1.0, step=0.005, group=grp_london)
-london_coef_a1s   = input.float(0.175, "Coef A1S London (Short Amp1)", minval=0.01, maxval=1.0, step=0.005, group=grp_london)
-london_coef_a2l   = input.float(0.250, "Coef A2L London (Long Amp2)",  minval=0.01, maxval=1.0, step=0.005, group=grp_london)
-london_coef_a2s   = input.float(0.275, "Coef A2S London (Short Amp2)", minval=0.01, maxval=1.0, step=0.005, group=grp_london)
+london_coef_a1l   = input.float(0.250, "Coef A1L London (entree long)",       minval=0.01, maxval=1.0, step=0.005, group=grp_london)
+london_coef_a1s   = input.float(0.250, "Coef A1S London (entree short)",      minval=0.01, maxval=1.0, step=0.005, group=grp_london)
+london_coef_a2l   = input.float(0.400, "Coef A2L London (espacement long)",   minval=0.01, maxval=1.0, step=0.005, group=grp_london)
+london_coef_a2s   = input.float(0.300, "Coef A2S London (espacement short)",  minval=0.01, maxval=1.0, step=0.005, group=grp_london)
 
 // ── Session NY AM ─────────────────────────────────────────────────────────────
 // Debut : ny_hour:ny_min (defaut 15h30 timezone amp_tz_id, "Paris" par defaut).
 // Fin   : implicite = debut de la session NY PM (nypm_startH:nypm_startMin).
 grp_sess         = "Session NY AM"
-ny_hour          = input.int(15, "Heure debut NY AM",   minval=0, maxval=23, group=grp_sess, inline="nyam_start")
+// Defaut 13h30 (et non 15h30) volontairement : on bascule les coefs NY AM
+// AVANT l'ouverture officielle NY (15h30 Paris) pour anticiper d'eventuels
+// mouvements forts Pre-NY. La formule avg v2 reste calibree sur 15h30 (les
+// briques preny_amp / ny_amp ne sont PAS impactees par ce decalage).
+ny_hour          = input.int(13, "Heure debut NY AM",   minval=0, maxval=23, group=grp_sess, inline="nyam_start")
 ny_min           = input.int(30, "Minute debut NY AM",  minval=0, maxval=59, group=grp_sess, inline="nyam_start")
 nyam_restart     = input.bool(true, "Restart recherche Amp1 au debut de NY AM", group=grp_sess)
-nyam_coef_a1l    = input.float(0.390, "Coef A1L NY AM (Long Amp1)",  minval=0.01, maxval=1.0, step=0.005, group=grp_sess)
-nyam_coef_a1s    = input.float(0.330, "Coef A1S NY AM (Short Amp1)", minval=0.01, maxval=1.0, step=0.005, group=grp_sess)
-nyam_coef_a2l    = input.float(0.420, "Coef A2L NY AM (Long Amp2)",  minval=0.01, maxval=1.0, step=0.005, group=grp_sess)
-nyam_coef_a2s    = input.float(0.255, "Coef A2S NY AM (Short Amp2)", minval=0.01, maxval=1.0, step=0.005, group=grp_sess)
-
-// ── Efficience NY (filtre Kaufman + alertes) ─────────────────────────────────
-// Filtre rattache a la session NY AM : ancrage a l'open de la 1ere M1
-// dont l'heure locale >= ny_hour:ny_min (= debut NY AM).
-grp_eff           = "Efficience NY"
-eff_enabled       = input.bool(true, "Activer le filtre d'efficience", group=grp_eff)
-eff_nogo_thr      = input.float(0.55, "Seuil No-Go (15h45 par defaut)", minval=0.0, maxval=1.0, step=0.01, group=grp_eff)
-eff_solder_thr    = input.float(0.40, "Seuil Solder (16h15 par defaut)", minval=0.0, maxval=1.0, step=0.01, group=grp_eff)
-eff_nogo_h        = input.int(15, "Heure No-Go", minval=0, maxval=23, group=grp_eff, inline="nogo")
-eff_nogo_min      = input.int(45, "Minute",     minval=0, maxval=59, group=grp_eff, inline="nogo")
-eff_solder_h      = input.int(16, "Heure Solder", minval=0, maxval=23, group=grp_eff, inline="solder")
-eff_solder_min    = input.int(15, "Minute",      minval=0, maxval=59, group=grp_eff, inline="solder")
+nyam_coef_a1l    = input.float(0.350, "Coef A1L NY AM (entree long)",       minval=0.01, maxval=1.0, step=0.005, group=grp_sess)
+nyam_coef_a1s    = input.float(0.300, "Coef A1S NY AM (entree short)",      minval=0.01, maxval=1.0, step=0.005, group=grp_sess)
+nyam_coef_a2l    = input.float(0.450, "Coef A2L NY AM (espacement long)",   minval=0.01, maxval=1.0, step=0.005, group=grp_sess)
+nyam_coef_a2s    = input.float(0.300, "Coef A2S NY AM (espacement short)",  minval=0.01, maxval=1.0, step=0.005, group=grp_sess)
 
 // ── Session NY PM ─────────────────────────────────────────────────────────────
 // Debut : nypm_startH:nypm_startMin (defaut 18h30) - sert aussi de fin pour NY AM.
 // Fin   : nypm_endH:nypm_endMin (defaut 22h00) - sert aussi de fin de fenetre globale.
 // Hors fenetre globale (entre fin NY PM et debut London) : aucune marque tracee.
 grp_nypm          = "Session NY PM"
-nypm_startH       = input.int(18, "Heure debut NY PM",  minval=0, maxval=23, group=grp_nypm, inline="nypm_start")
+// Defaut 17h30 (et non 18h30) volontairement : on bascule les coefs NY PM
+// AVANT l'ouverture officielle NY PM pour anticiper d'eventuels mouvements
+// forts qui annoncent la session PM. La formule avg ne depend pas de ce decalage.
+nypm_startH       = input.int(17, "Heure debut NY PM",  minval=0, maxval=23, group=grp_nypm, inline="nypm_start")
 nypm_startMin     = input.int(30, "Minute debut NY PM", minval=0, maxval=59, group=grp_nypm, inline="nypm_start")
 nypm_endH         = input.int(22, "Heure fin NY PM",    minval=0, maxval=24, group=grp_nypm, inline="nypm_end")
 nypm_endMin       = input.int(0,  "Minute fin NY PM",   minval=0, maxval=59, group=grp_nypm, inline="nypm_end")
 nypm_restart      = input.bool(true, "Restart recherche Amp1 au debut de NY PM", group=grp_nypm)
-nypm_coef_a1l     = input.float(0.325, "Coef A1L NY PM (Long Amp1)",  minval=0.01, maxval=1.0, step=0.005, group=grp_nypm)
-nypm_coef_a1s     = input.float(0.225, "Coef A1S NY PM (Short Amp1)", minval=0.01, maxval=1.0, step=0.005, group=grp_nypm)
-nypm_coef_a2l     = input.float(0.400, "Coef A2L NY PM (Long Amp2)",  minval=0.01, maxval=1.0, step=0.005, group=grp_nypm)
-nypm_coef_a2s     = input.float(0.300, "Coef A2S NY PM (Short Amp2)", minval=0.01, maxval=1.0, step=0.005, group=grp_nypm)
+nypm_coef_a1l     = input.float(0.150, "Coef A1L NY PM (entree long)",       minval=0.01, maxval=1.0, step=0.005, group=grp_nypm)
+nypm_coef_a1s     = input.float(0.200, "Coef A1S NY PM (entree short)",      minval=0.01, maxval=1.0, step=0.005, group=grp_nypm)
+nypm_coef_a2l     = input.float(0.200, "Coef A2L NY PM (espacement long)",   minval=0.01, maxval=1.0, step=0.005, group=grp_nypm)
+nypm_coef_a2s     = input.float(0.250, "Coef A2S NY PM (espacement short)",  minval=0.01, maxval=1.0, step=0.005, group=grp_nypm)
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 grp_dash  = "Dashboard"
 show_dash = input.bool(true, "Afficher le dashboard", group=grp_dash)
-
-// ── Calcul Amp. Reco ──────────────────────────────────────────────────────────
-// Le nombre de jours est commun aux 3 sessions ; les 4 coefs par session sont
-// dans leurs groupes respectifs ci-dessus.
-grp_reco         = "Calcul Amp. Reco"
-reco_n_days      = input.int(5,    "Nb jours pour la somme",  minval=1, maxval=30, group=grp_reco)
 
 // ── Niveaux (toggle maitre pour toutes les lignes Fibo et Day) ───────────────
 grp_lvl     = "Niveaux (Fibo et Day lines)"
@@ -503,39 +571,11 @@ amp_lineWidth   = input.int(2,      "Epaisseur trait",                minval=1, 
 amp_bullColor   = input.color(color.new(#00C853, 10), "Couleur haussiere (signal achat)", group=grp_marks)
 amp_bearColor   = input.color(color.new(#FF1744, 10), "Couleur baissiere (signal vente)", group=grp_marks)
 
-// === Etat efficience Kaufman - filtre NY ===
-// Ancrage a l'open de la 1ere M1 de la session NY = 15h30 Paris.
-// Reset journalier sur dk = minuit timezone amp_tz_id.
-// Encapsule dans un UDT : Pine v6 interdit a une fonction de modifier des
-// var globaux par :=, mais autorise la mutation de champs d'une instance UDT.
-type EffState
-    float o0            // open de la bougie d'ancrage 15h30
-    float prevC         // close de la M1 precedente
-    float path          // somme cumulee des delta close
-    float current       // efficience instantanee
-    float nogo_value    // valeur figee a l'heure no-go
-    float solder_value  // valeur figee a l'heure solder
-    bool  anchored      // true des qu'on a ancre o0 pour la session
-    bool  nogo_done     // true des que l'heure no-go est atteinte
-    bool  solder_done   // true des que l'heure solder est atteinte
-    int   dayKey
-
-var EffState eff_s = EffState.new(
-     o0           = na,
-     prevC        = na,
-     path         = 0.0,
-     current      = 0.0,
-     nogo_value   = na,
-     solder_value = na,
-     anchored     = false,
-     nogo_done    = false,
-     solder_done  = false,
-     dayKey       = 0)
-
 // Effective L/S amp1/amp2 values per session, in points (= prix / amp_pointSize).
 // Initialisees avec les 4 inputs manuels (memes valeurs pour les 3 sessions),
-// surchargees apres calcul du dashboard si Auto NY est coche, ou les 12 valeurs
-// deviennent round(coef_session * avg_reco) / amp_pointSize.
+// surchargees plus bas si Auto NY est coche par les Amp. Reco calculees via
+// formule avg v2 : amp_session = round(coef_session * avg_session) / amp_pointSize
+// avec avg_london pour London et avg_ny pour NY AM / NY PM.
 amp_london_a1l_eff = amp1L_Pts
 amp_london_a1s_eff = amp1S_Pts
 amp_london_a2l_eff = amp2L_Pts
@@ -671,11 +711,39 @@ var label lbl_day_high  = na
 var label lbl_day_low   = na
 var label lbl_day_mid   = na
 
-// Tracking des amplitudes NY historiques (15h30-22h Paris) sur 5 jours
-var float ny_session_high   = na
-var float ny_session_low    = na
-var bool  ny_session_active = false
+// Tracking des 4 briques d'amplitude pour formule avg v2 (toutes en heure Paris).
+// Fenetres journalieres : preny [0h, 15h29], ny [15h30, 22h], prelondon [0h, 7h59],
+// london [8h, 14h]. A la fermeture de chaque fenetre, on push high-low dans son
+// historique glissant 5 jours pour le calcul avg v2.
+var float ny_h               = na
+var float ny_l               = na
+var bool  ny_active          = false
 var array<float> ny_amp_hist = array.new<float>()
+
+var float preny_h               = na
+var float preny_l               = na
+var bool  preny_active          = false
+var array<float> preny_amp_hist = array.new<float>()
+
+var float london_h               = na
+var float london_l               = na
+var bool  london_active          = false
+var array<float> london_amp_hist = array.new<float>()
+
+var float prelondon_h               = na
+var float prelondon_l               = na
+var bool  prelondon_active          = false
+var array<float> prelondon_amp_hist = array.new<float>()
+
+const int NWIN = 5
+
+// Bases d'amplitude calculees par formule avg v2 (figees au debut de chaque session) :
+//   avg_london = mediane(5j london) * coef_borne (coef = prelondon_J / mediane(5j prelondon))
+//   avg_ny     = mediane(5j ny)     * coef_borne (coef = preny_J     / mediane(5j preny))
+// Coef borne dans [0.5, 2.0]. Recalculees a la fermeture de chaque pre-amplitude
+// (avg_london a 8h00 = ouverture London, avg_ny a 15h30 = ouverture NY AM).
+var float avg_london = na
+var float avg_ny     = na
 
 var bool session_started = false   // Pre-NY : Fibo dessines au moins une fois
 var bool post_ny_started = false   // Post-NY : Day lines dessinees au moins une fois
@@ -798,27 +866,107 @@ if not is_new_day
     day_high := math.max(nz(day_high, high), high)
     day_low  := math.min(nz(day_low,  low),  low)
 
-// ── Tracking amplitude NY (15h30 - 22h Paris) sur 5 jours glissants ──────────
-// Fenetre identique a la session NY AM+PM jusqu'a 22h Paris (defaut user)
-ny_pm_close_utc = 22 * 60 - (f_is_cest(time) ? 2 : 1) * 60
-in_ny_pm = utc_total >= ny_utc and utc_total < ny_pm_close_utc
+// ── Tracking des 4 briques d'amplitude (formule avg v2) ──────────────────────
+// Toutes en heure Paris (Europe/Paris), DST gere automatiquement par Pine.
+// Bornes (en minutes Paris) :
+//   prelondon : [0,   480)   = 00h00 - 07h59
+//   london    : [480, 840)   = 08h00 - 13h59
+//   preny     : [0,   930)   = 00h00 - 15h29
+//   ny        : [930, 1320)  = 15h30 - 21h59
+// Note : prelondon et preny se chevauchent (les deux actifs entre 0h et 7h59).
+// C'est volontaire - ce sont les 2 pre-amplitudes du jour, mesurees jusqu'a
+// l'ouverture de leur session respective.
+int parisMinsTrack = hour(time, "Europe/Paris") * 60 + minute(time, "Europe/Paris")
+bool in_prelondon  = parisMinsTrack < 480
+bool in_london     = parisMinsTrack >= 480 and parisMinsTrack < 840
+bool in_preny      = parisMinsTrack < 930
+bool in_ny         = parisMinsTrack >= 930 and parisMinsTrack < 1320
 
-if in_ny_pm
-    if not ny_session_active
-        ny_session_high   := high
-        ny_session_low    := low
-        ny_session_active := true
+// Brique NY (15h30 - 22h)
+if in_ny
+    if not ny_active
+        ny_h := high
+        ny_l := low
+        ny_active := true
     else
-        ny_session_high := math.max(ny_session_high, high)
-        ny_session_low  := math.min(ny_session_low,  low)
-else if ny_session_active
-    // Sortie de session : on pousse l'amplitude de la session NY ecoulee
-    array.push(ny_amp_hist, ny_session_high - ny_session_low)
-    if array.size(ny_amp_hist) > reco_n_days
+        ny_h := math.max(ny_h, high)
+        ny_l := math.min(ny_l, low)
+else if ny_active
+    array.push(ny_amp_hist, ny_h - ny_l)
+    if array.size(ny_amp_hist) > NWIN
         array.shift(ny_amp_hist)
-    ny_session_high   := na
-    ny_session_low    := na
-    ny_session_active := false
+    ny_h := na
+    ny_l := na
+    ny_active := false
+
+// Brique Pre-NY (0h - 15h29). A la fermeture (= 15h30, ouverture NY AM), on
+// calcule avg_ny pour la journee AVANT de pousser preny_amp_J dans l'historique.
+// Cela garantit que array.median(preny_amp_hist) = mediane des 5 jours PRECEDENTS
+// (sans contaminer par le jour J).
+if in_preny
+    if not preny_active
+        preny_h := high
+        preny_l := low
+        preny_active := true
+    else
+        preny_h := math.max(preny_h, high)
+        preny_l := math.min(preny_l, low)
+else if preny_active
+    float preny_amp_J = preny_h - preny_l
+    if array.size(ny_amp_hist) >= NWIN and array.size(preny_amp_hist) >= NWIN
+        float base = array.median(ny_amp_hist)
+        float med  = array.median(preny_amp_hist)
+        float coef = med > 0 ? preny_amp_J / med : 1.0
+        coef := math.max(0.5, math.min(2.0, coef))
+        avg_ny := base * coef
+    array.push(preny_amp_hist, preny_amp_J)
+    if array.size(preny_amp_hist) > NWIN
+        array.shift(preny_amp_hist)
+    preny_h := na
+    preny_l := na
+    preny_active := false
+
+// Brique London (8h - 14h)
+if in_london
+    if not london_active
+        london_h := high
+        london_l := low
+        london_active := true
+    else
+        london_h := math.max(london_h, high)
+        london_l := math.min(london_l, low)
+else if london_active
+    array.push(london_amp_hist, london_h - london_l)
+    if array.size(london_amp_hist) > NWIN
+        array.shift(london_amp_hist)
+    london_h := na
+    london_l := na
+    london_active := false
+
+// Brique Pre-London (0h - 7h59). A la fermeture (= 8h00, ouverture London), on
+// calcule avg_london pour la journee AVANT de pousser prelondon_amp_J dans l'hist.
+if in_prelondon
+    if not prelondon_active
+        prelondon_h := high
+        prelondon_l := low
+        prelondon_active := true
+    else
+        prelondon_h := math.max(prelondon_h, high)
+        prelondon_l := math.min(prelondon_l, low)
+else if prelondon_active
+    float prelondon_amp_J = prelondon_h - prelondon_l
+    if array.size(london_amp_hist) >= NWIN and array.size(prelondon_amp_hist) >= NWIN
+        float base = array.median(london_amp_hist)
+        float med  = array.median(prelondon_amp_hist)
+        float coef = med > 0 ? prelondon_amp_J / med : 1.0
+        coef := math.max(0.5, math.min(2.0, coef))
+        avg_london := base * coef
+    array.push(prelondon_amp_hist, prelondon_amp_J)
+    if array.size(prelondon_amp_hist) > NWIN
+        array.shift(prelondon_amp_hist)
+    prelondon_h := na
+    prelondon_l := na
+    prelondon_active := false
 
 // ── Snapshot a l'ouverture NY ────────────────────────────────────────────────
 if at_ny_open
@@ -1161,26 +1309,18 @@ if show_mid and not na(mid_open)
         if not na(lbl_midnight)
             label.set_x(lbl_midnight, bar_index + mid_offset)
 
-// ── Dashboard ─────────────────────────────────────────────────────────────────
-// Ratios NY/PreNY par jour (0=Lun..4=Ven) issus des statistiques NQ 2024-2026
-// Source : Calculatrice Xeilos — Option B percentiles par jour de la semaine
-p50r = array.from(0.65, 0.77, 0.78, 0.78, 0.70)  // 50% des jours depassent
-p75r = array.from(0.92, 1.02, 1.22, 1.03, 0.90)  // 25% des jours depassent
-p90r = array.from(1.27, 1.26, 1.79, 1.33, 1.42)  // 10% des jours depassent
-// Amplitude recommandee : methode (v1.9, diviseur ajuste v1.18, dissociation L/S v1.19)
-// La moyenne est calculee UNE SEULE FOIS avec l'amplitude NY estimee P90 (la plus grande) :
-//   avg = (Amp.NY P90 + somme amplitudes NY recentes) / (nb_jours_reellement_charges + 1)
-// Le diviseur utilise la taille reelle de l'historique (array.size(ny_amp_hist)) au
-// lieu de N figé : evite de sous-estimer la moyenne en phase de warmup ou si moins
-// de N jours sont disponibles. Coherent avec la version Tradovate.
-// Puis 4 coefficients differents donnent les 4 Amp. Reco (Long / Short, Amp1 / Amp2) :
-//   reco_A1L = round(coef_A1L * avg)    [0.390 par defaut]
-//   reco_A1S = round(coef_A1S * avg)    [0.330 par defaut]
-//   reco_A2L = round(coef_A2L * avg)    [0.420 par defaut]
-//   reco_A2S = round(coef_A2S * avg)    [0.255 par defaut]
-// N et les 4 coefficients sont configurables.
+// ── Dashboard / Calcul Amp. Reco (v3.0 - formule avg v2) ─────────────────────
+// Les bases avg_ny et avg_london ont ete calculees en amont a la fermeture des
+// pre-amplitudes (avg_london a 8h00, avg_ny a 15h30). Ici on applique les 12
+// coefficients (4 par session) sur la base correspondante :
+//   London : avg_london
+//   NY AM  : avg_ny
+//   NY PM  : avg_ny
+// Le mode Auto NY n'est actif que si la base correspondante est disponible
+// (warmup : il faut au moins 5 jours d'historique). Sinon, les inputs manuels
+// A1L/A1S/A2L/A2S sont utilises.
 
-// Somme et moyenne simple des N dernieres amplitudes NY (15h30-22h Paris)
+// Moyenne simple des N dernieres amplitudes NY (reference informative dashboard)
 sum_5d_ny  = 0.0
 hist_size  = array.size(ny_amp_hist)
 if hist_size > 0
@@ -1188,54 +1328,41 @@ if hist_size > 0
         sum_5d_ny += array.get(ny_amp_hist, i)
 mean_5d_ny = hist_size > 0 ? sum_5d_ny / hist_size : 0.0
 
-// Jour de la semaine → index 0-4 (week-end → Lundi par defaut)
-dow_raw  = dayofweek(time)
-dow_idx  = dow_raw == 2 ? 0 : dow_raw == 3 ? 1 : dow_raw == 4 ? 2 : dow_raw == 5 ? 3 : dow_raw == 6 ? 4 : 0
-dow_name = dow_raw == 2 ? "Lundi" : dow_raw == 3 ? "Mardi" : dow_raw == 4 ? "Mercredi" : dow_raw == 5 ? "Jeudi" : dow_raw == 6 ? "Vendredi" : "Lundi"
+// Amp. Reco par session : coef_session * avg_session (ou na si warmup non termine).
+amp_reco_london_a1l = na(avg_london) ? na : math.round(london_coef_a1l * avg_london)
+amp_reco_london_a1s = na(avg_london) ? na : math.round(london_coef_a1s * avg_london)
+amp_reco_london_a2l = na(avg_london) ? na : math.round(london_coef_a2l * avg_london)
+amp_reco_london_a2s = na(avg_london) ? na : math.round(london_coef_a2s * avg_london)
+amp_reco_nyam_a1l   = na(avg_ny)     ? na : math.round(nyam_coef_a1l * avg_ny)
+amp_reco_nyam_a1s   = na(avg_ny)     ? na : math.round(nyam_coef_a1s * avg_ny)
+amp_reco_nyam_a2l   = na(avg_ny)     ? na : math.round(nyam_coef_a2l * avg_ny)
+amp_reco_nyam_a2s   = na(avg_ny)     ? na : math.round(nyam_coef_a2s * avg_ny)
+amp_reco_nypm_a1l   = na(avg_ny)     ? na : math.round(nypm_coef_a1l * avg_ny)
+amp_reco_nypm_a1s   = na(avg_ny)     ? na : math.round(nypm_coef_a1s * avg_ny)
+amp_reco_nypm_a2l   = na(avg_ny)     ? na : math.round(nypm_coef_a2l * avg_ny)
+amp_reco_nypm_a2s   = na(avg_ny)     ? na : math.round(nypm_coef_a2s * avg_ny)
 
-ratio_faible = array.get(p90r, dow_idx)
-ratio_fort   = array.get(p50r, dow_idx)
-
-amp_ny_faible = ratio_faible * use_amp   // amplitude NY estimee maxi - percentile P90
-amp_ny_fort   = ratio_fort   * use_amp   // amplitude NY estimee mini - percentile P50
-
-// Moyenne unique basee sur l'estimation la plus grande (P90)
-// Diviseur = nombre de jours NY reellement charges + 1 (le "+1" = amp_ny_faible).
-avg_reco = (amp_ny_faible + sum_5d_ny) / (hist_size + 1)
-
-// Amp. Reco par session : 4 coefs distincts par session, appliques a la meme
-// moyenne avg_reco. Affiches en points sur le dashboard, convertis en unite
-// de prix dans le greffon via amp_pointSize.
-amp_reco_london_a1l = math.round(london_coef_a1l * avg_reco)
-amp_reco_london_a1s = math.round(london_coef_a1s * avg_reco)
-amp_reco_london_a2l = math.round(london_coef_a2l * avg_reco)
-amp_reco_london_a2s = math.round(london_coef_a2s * avg_reco)
-amp_reco_nyam_a1l   = math.round(nyam_coef_a1l * avg_reco)
-amp_reco_nyam_a1s   = math.round(nyam_coef_a1s * avg_reco)
-amp_reco_nyam_a2l   = math.round(nyam_coef_a2l * avg_reco)
-amp_reco_nyam_a2s   = math.round(nyam_coef_a2s * avg_reco)
-amp_reco_nypm_a1l   = math.round(nypm_coef_a1l * avg_reco)
-amp_reco_nypm_a1s   = math.round(nypm_coef_a1s * avg_reco)
-amp_reco_nypm_a2l   = math.round(nypm_coef_a2l * avg_reco)
-amp_reco_nypm_a2s   = math.round(nypm_coef_a2s * avg_reco)
-
-// Auto NY : surcharge les 12 amplitudes du greffon avec les Amp. Reco par session.
-// Sinon, les 12 valeurs gardent les inputs manuels (memes pour les 3 sessions).
+// Auto NY : surcharge des 12 amplitudes effectives.
+// Warmup geometre : si avg_london est na, on garde les inputs manuels pour London.
+// Idem pour NY AM/PM si avg_ny est na. Les amp_*_eff sont initialisees avec les
+// inputs manuels (declaration plus haut), donc rien a faire en cas de na.
 //   L = Long  (marque verte / signal achat) -> direction "down"
 //   S = Short (marque rouge / signal vente) -> direction "up"
 if amp_auto_ny
-    amp_london_a1l_eff := amp_reco_london_a1l / amp_pointSize
-    amp_london_a1s_eff := amp_reco_london_a1s / amp_pointSize
-    amp_london_a2l_eff := amp_reco_london_a2l / amp_pointSize
-    amp_london_a2s_eff := amp_reco_london_a2s / amp_pointSize
-    amp_nyam_a1l_eff   := amp_reco_nyam_a1l   / amp_pointSize
-    amp_nyam_a1s_eff   := amp_reco_nyam_a1s   / amp_pointSize
-    amp_nyam_a2l_eff   := amp_reco_nyam_a2l   / amp_pointSize
-    amp_nyam_a2s_eff   := amp_reco_nyam_a2s   / amp_pointSize
-    amp_nypm_a1l_eff   := amp_reco_nypm_a1l   / amp_pointSize
-    amp_nypm_a1s_eff   := amp_reco_nypm_a1s   / amp_pointSize
-    amp_nypm_a2l_eff   := amp_reco_nypm_a2l   / amp_pointSize
-    amp_nypm_a2s_eff   := amp_reco_nypm_a2s   / amp_pointSize
+    if not na(avg_london)
+        amp_london_a1l_eff := amp_reco_london_a1l / amp_pointSize
+        amp_london_a1s_eff := amp_reco_london_a1s / amp_pointSize
+        amp_london_a2l_eff := amp_reco_london_a2l / amp_pointSize
+        amp_london_a2s_eff := amp_reco_london_a2s / amp_pointSize
+    if not na(avg_ny)
+        amp_nyam_a1l_eff := amp_reco_nyam_a1l / amp_pointSize
+        amp_nyam_a1s_eff := amp_reco_nyam_a1s / amp_pointSize
+        amp_nyam_a2l_eff := amp_reco_nyam_a2l / amp_pointSize
+        amp_nyam_a2s_eff := amp_reco_nyam_a2s / amp_pointSize
+        amp_nypm_a1l_eff := amp_reco_nypm_a1l / amp_pointSize
+        amp_nypm_a1s_eff := amp_reco_nypm_a1s / amp_pointSize
+        amp_nypm_a2l_eff := amp_reco_nypm_a2l / amp_pointSize
+        amp_nypm_a2s_eff := amp_reco_nypm_a2s / amp_pointSize
 
 // Determination de la session courante (pour dashboard + greffon).
 // Bornes : London = [london_start, ny_am_start), NY AM = [ny_am_start, nypm_start),
@@ -1253,43 +1380,6 @@ bool   amp_in_nypm       = amp_now_mins >= nypm_start_mins   and amp_now_mins < 
 bool   amp_in_any        = amp_in_london or amp_in_nyam or amp_in_nypm
 // Raccourci 3 caracteres pour l'affichage compact du dashboard.
 string amp_current_label = amp_in_london ? "LON" : amp_in_nyam ? "NYA" : amp_in_nypm ? "NYP" : "HS"
-
-// ── Live preview efficience (avant le dashboard) ─────────────────────────────
-// Sur les charts > M1, request.security_lower_tf delivre les M1 batches a la
-// cloture de chaque barre du chart : sans cette section, le dashboard attend
-// la fin de la 1ere barre apres 15h30 pour afficher une valeur (5 min sur M5,
-// 15 min sur M15, etc.).
-//
-// Deux mecanismes :
-//  1. Fallback anchor : si l'heure Paris de la barre realtime vient de franchir
-//     NY AM et qu'aucune M1 n'a encore ancre, on ancre avec l'open de la barre
-//     courante. Sur tout chart aligne sur la transition 15h30 (M1/M2/M3/M5/M15...),
-//     cet open est identique a l'open de la M1 contenant 15h30:00, donc la
-//     prochaine M1 batch s'integrera proprement par-dessus.
-//  2. Live preview : si deja ancre, on recalcule eff_s.current en ajoutant le
-//     close courant du chart comme "tick supplementaire" au-dessus du path
-//     committe. Le path n'est PAS modifie : la prochaine M1 batch le mettra a
-//     jour proprement.
-if eff_enabled and barstate.isrealtime
-    int eff_live_local_mins = hour(time, amp_tz_id) * 60 + minute(time, amp_tz_id)
-    int eff_live_ny_am_mins = ny_hour * 60 + ny_min
-    int eff_live_prev_mins  = na(time[1]) ? 0 : hour(time[1], amp_tz_id) * 60 + minute(time[1], amp_tz_id)
-
-    // Fallback anchor sur la barre de transition 15h30
-    if not eff_s.anchored and eff_live_prev_mins < eff_live_ny_am_mins and eff_live_local_mins >= eff_live_ny_am_mins
-        eff_s.o0       := open
-        eff_s.prevC    := open
-        eff_s.path     := 0.0
-        eff_s.current  := 0.0
-        eff_s.anchored := true
-
-    // Live preview de eff_s.current avec le close courant du chart.
-    // Gate sur "apres NY AM" pour eviter de recalculer current avec un o0 perime
-    // pendant la fenetre entre minuit (reset journalier dans la M1 batch) et
-    // l'ouverture NY (~1 barre de chart sur instrument 24/7).
-    if eff_s.anchored and not na(eff_s.prevC) and not na(eff_s.o0) and eff_live_local_mins >= eff_live_ny_am_mins
-        float eff_live_preview_path = eff_s.path + math.abs(close - eff_s.prevC)
-        eff_s.current := eff_live_preview_path > 0 ? math.abs(close - eff_s.o0) / eff_live_preview_path : 0.0
 
 if barstate.islast and show_dash
     dir_str = is_down ? "DOWN  ▼" : "UP  ▲"
@@ -1311,29 +1401,8 @@ if barstate.islast and show_dash
     a2l_disp = math.round(a2l_active * amp_pointSize)
     a2s_disp = math.round(a2s_active * amp_pointSize)
 
-    // Valeurs efficience pour les colonnes No-Go / Solder
-    // Affichage live tant que le gate n'est pas atteint, puis fige a la valeur du gate.
-    // Couleur : gris tant que le seuil n'est pas atteint, rouge des qu'il l'est.
-    // Le freeze est decide en comparant l'heure Paris de la barre courante du
-    // chart aux seuils nogo / solder, plutot qu'en lisant eff_s.nogo_done /
-    // eff_s.solder_done : le dashboard est rendu PLUS HAUT dans le script que
-    // la boucle des M1 (qui met a jour eff_s). Resultat : nogo se fige des que
-    // la barre du chart franchit 15h45 Paris, sans attendre le tour suivant.
-    int  eff_dash_h    = hour(time, amp_tz_id)
-    int  eff_dash_m    = minute(time, amp_tz_id)
-    int  eff_dash_mins = eff_dash_h * 60 + eff_dash_m
-    bool eff_nogo_gate_past   = eff_dash_mins >= eff_nogo_h   * 60 + eff_nogo_min
-    bool eff_solder_gate_past = eff_dash_mins >= eff_solder_h * 60 + eff_solder_min
-
-    float  nogo_val_disp   = (eff_nogo_gate_past   and not na(eff_s.nogo_value))   ? eff_s.nogo_value   : eff_s.current
-    float  solder_val_disp = (eff_solder_gate_past and not na(eff_s.solder_value)) ? eff_s.solder_value : eff_s.current
-    string nogo_str        = (eff_enabled and eff_s.anchored) ? str.tostring(nogo_val_disp,   "0.00") : "—"
-    string solder_str      = (eff_enabled and eff_s.anchored) ? str.tostring(solder_val_disp, "0.00") : "—"
-    color  nogo_col        = (eff_enabled and eff_s.anchored and nogo_val_disp   >= eff_nogo_thr)   ? color.new(#ff7b72, 0) : color.gray
-    color  solder_col      = (eff_enabled and eff_s.anchored and solder_val_disp >= eff_solder_thr) ? color.new(#ff7b72, 0) : color.gray
-
     var table ts = table.new(
-         position.bottom_right, 3, 9,
+         position.bottom_right, 3, 7,
          bgcolor      = color.new(color.gray, 85),
          border_width = 0)
 
@@ -1342,21 +1411,25 @@ if barstate.islast and show_dash
     table.cell(ts, 1, 0, "",         text_size=size.small)
     table.cell(ts, 2, 0, frz_str_s,  text_color=frz_col_s,  text_size=size.small)
 
-    // Row 1 : Amp. Pre-NY (label + valeur)
-    table.cell(ts, 0, 1, "Amp. Pre-NY", text_color=color.gray, text_size=size.small)
-    table.cell(ts, 1, 1, amp_str,       text_color=dir_col,    text_size=size.small)
-    table.cell(ts, 2, 1, "",            text_size=size.small)
+    // Row 1 : Amp. Pre-NY (label + valeur) + Auto/Manuel en col 2.
+    string amp_source_str = amp_auto_ny ? "Auto" : "Manuel"
+    color  amp_source_col = amp_auto_ny ? color.new(#3fb950, 0) : color.new(#c99a2c, 0)
+    table.cell(ts, 0, 1, "Amp. Pre-NY",  text_color=color.gray,     text_size=size.small)
+    table.cell(ts, 1, 1, amp_str,        text_color=dir_col,        text_size=size.small)
+    table.cell(ts, 2, 1, amp_source_str, text_color=amp_source_col, text_size=size.small)
 
-    // Row 2 : Amp. Moy. Nd (label + valeur)
-    table.cell(ts, 0, 2, "Amp. Moy. " + str.tostring(reco_n_days) + "d", text_color=color.gray, text_size=size.small)
+    // Row 2 : Amp. Moy. Nd (label + valeur) - moyenne simple des 5 dernieres ny_amp
+    table.cell(ts, 0, 2, "Amp. Moy. " + str.tostring(NWIN) + "d", text_color=color.gray, text_size=size.small)
     table.cell(ts, 1, 2, str.tostring(math.round(mean_5d_ny)) + " pts",  text_color=color.gray, text_size=size.small)
     table.cell(ts, 2, 2, "",                                              text_size=size.small)
 
-    // Row 3 : Amp. NY min/max (P50 mini = rouge "plus risque" ; P90 maxi = vert "moins risque")
-    // Convention specifique a cette ligne : la petite valeur est plus risquee, donc rouge.
-    table.cell(ts, 0, 3, "Amp. NY min/max",                                  text_color=color.gray,            text_size=size.small)
-    table.cell(ts, 1, 3, str.tostring(math.round(amp_ny_fort))   + " pts",   text_color=color.new(#ff7b72, 0), text_size=size.small)
-    table.cell(ts, 2, 3, str.tostring(math.round(amp_ny_faible)) + " pts",   text_color=color.new(#3fb950, 0), text_size=size.small)
+    // Row 3 : Avg v2 par session (London / NY). Affiches en pts.
+    // Si warmup non termine (< 5 jours d'historique), affiche "..." pour signaler.
+    string avg_lon_str = na(avg_london) ? "..." : str.tostring(math.round(avg_london)) + " pts"
+    string avg_ny_str  = na(avg_ny)     ? "..." : str.tostring(math.round(avg_ny))     + " pts"
+    table.cell(ts, 0, 3, "Avg",         text_color=color.gray, text_size=size.small)
+    table.cell(ts, 1, 3, avg_lon_str,   text_color=color.gray, text_size=size.small)
+    table.cell(ts, 2, 3, avg_ny_str,    text_color=color.gray, text_size=size.small)
 
     // Row 4 : header "Long" / "Short" + nom de la session courante
     // (les valeurs A1/A2 ci-dessous changent selon la session active).
@@ -1373,19 +1446,6 @@ if barstate.islast and show_dash
     table.cell(ts, 0, 6, "A2",                              text_color=color.gray,            text_size=size.small)
     table.cell(ts, 1, 6, str.tostring(a2l_disp) + " pts",   text_color=color.new(#3fb950, 0), text_size=size.small)
     table.cell(ts, 2, 6, str.tostring(a2s_disp) + " pts",   text_color=color.new(#ff7b72, 0), text_size=size.small)
-
-    // Row 7 : Source des amplitudes (col 0) + header No-Go / Solder (col 1+2).
-    // "Manuel" si inputs A*_Pts utilises tels quels, "Auto" si Amp. Reco calculee.
-    string amp_source_str = amp_auto_ny ? "Auto" : "Manuel"
-    color  amp_source_col = amp_auto_ny ? color.new(#3fb950, 0) : color.new(#c99a2c, 0)
-    table.cell(ts, 0, 7, amp_source_str, text_color=amp_source_col, text_size=size.small)
-    table.cell(ts, 1, 7, "No-Go",        text_color=color.gray,     text_size=size.small)
-    table.cell(ts, 2, 7, "Solder",       text_color=color.gray,     text_size=size.small)
-
-    // Row 8 : Filtre efficience (label + valeur No-Go + valeur Solder)
-    table.cell(ts, 0, 8, "Filtre efficience", text_color=color.gray, text_size=size.small)
-    table.cell(ts, 1, 8, nogo_str,            text_color=nogo_col,   text_size=size.small)
-    table.cell(ts, 2, 8, solder_str,          text_color=solder_col, text_size=size.small)
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1450,54 +1510,6 @@ f_drawAmpMarker(triggerPrice, useBearColor, t) =>
     col   = useBearColor ? amp_bearColor : amp_bullColor
     line.new(x1=t - halfW, y1=triggerPrice, x2=t + halfW, y2=triggerPrice,
              xloc=xloc.bar_time, color=col, width=amp_lineWidth)
-
-// === Traitement efficience Kaufman sur une bougie M1 ===
-// Formule : eff = |close - o0| / somme |close - prevClose|
-// avec o0 = open de la 1ere M1 de la session NY.
-// Bornee [0, 1]. Reinitialisation chaque jour a minuit timezone amp_tz_id.
-f_processEffBar(float o, float c, int t) =>
-    // 1) Reset journalier
-    int dk = year(t, amp_tz_id) * 10000 + month(t, amp_tz_id) * 100 + dayofmonth(t, amp_tz_id)
-    if eff_s.dayKey != 0 and dk != eff_s.dayKey
-        eff_s.o0           := na
-        eff_s.prevC        := na
-        eff_s.path         := 0.0
-        eff_s.current      := 0.0
-        eff_s.nogo_value   := na
-        eff_s.solder_value := na
-        eff_s.anchored     := false
-        eff_s.nogo_done    := false
-        eff_s.solder_done  := false
-    eff_s.dayKey := dk
-
-    // 2) Horaires en minutes dans la timezone amp_tz_id (Paris par defaut)
-    int localMinsTz    = hour(t, amp_tz_id) * 60 + minute(t, amp_tz_id)
-    int nyAmMinsLocal  = ny_hour       * 60 + ny_min
-    int nogoMins       = eff_nogo_h    * 60 + eff_nogo_min
-    int solderMins     = eff_solder_h  * 60 + eff_solder_min
-
-    // 3) Ancrage a la 1ere M1 dont localMinsTz >= nyAmMins
-    if not eff_s.anchored and localMinsTz >= nyAmMinsLocal
-        eff_s.o0       := o
-        eff_s.prevC    := o
-        eff_s.path     := 0.0
-        eff_s.current  := 0.0
-        eff_s.anchored := true
-
-    // 4) Accumulation a chaque M1 ancree
-    if eff_s.anchored
-        eff_s.path    := eff_s.path + math.abs(c - eff_s.prevC)
-        eff_s.prevC   := c
-        eff_s.current := eff_s.path > 0 ? math.abs(c - eff_s.o0) / eff_s.path : 0.0
-
-    // 5) Gel des valeurs aux deux gates horaires
-    if eff_s.anchored and not eff_s.nogo_done and localMinsTz >= nogoMins
-        eff_s.nogo_value := eff_s.current
-        eff_s.nogo_done  := true
-
-    if eff_s.anchored and not eff_s.solder_done and localMinsTz >= solderMins
-        eff_s.solder_value := eff_s.current
-        eff_s.solder_done  := true
 
 // === Traitement d'une bougie M1 ===
 f_processAmpBar(float h, float l, int t) =>
@@ -1783,40 +1795,16 @@ f_processAmpBar(float h, float l, int t) =>
                 amp_s.retracementSeen := false
                 amp_s.currentPath     := "amp2"
 
-// === Entry point greffon + efficience ===
+// === Entry point greffon ===
 // Force M1 quelle que soit la TF du chart. Si chart < M1, retombe sur la TF du chart.
-// On demande aussi open et close pour le calcul de l'efficience.
 string amp_forcedTf = timeframe.in_seconds(timeframe.period) >= 60 ? "1" : timeframe.period
-[amp_m1_h, amp_m1_l, amp_m1_o, amp_m1_c, amp_m1_t] = request.security_lower_tf(syminfo.tickerid, amp_forcedTf, [high, low, open, close, time])
+[amp_m1_h, amp_m1_l, amp_m1_t] = request.security_lower_tf(syminfo.tickerid, amp_forcedTf, [high, low, time])
 
-if (show_marks or eff_enabled) and not na(amp_m1_h)
+if show_marks and not na(amp_m1_h)
     int amp_n = array.size(amp_m1_h)
     if amp_n > 0
         for i = 0 to amp_n - 1
             float m1_h = array.get(amp_m1_h, i)
             float m1_l = array.get(amp_m1_l, i)
-            float m1_o = array.get(amp_m1_o, i)
-            float m1_c = array.get(amp_m1_c, i)
             int   m1_t = array.get(amp_m1_t, i)
-            if show_marks
-                f_processAmpBar(m1_h, m1_l, m1_t)
-            if eff_enabled
-                f_processEffBar(m1_o, m1_c, m1_t)
-
-// === Alertes efficience ===
-// Detection de la transition false -> true au franchissement du gate horaire.
-// Une seule emission par jour grace au reset journalier de eff_s.nogo_done / eff_s.solder_done.
-// Pine v6 n'accepte pas nz() sur un champ UDT bool historique : on tracke
-// l'etat de la barre precedente avec deux var bool dedies au niveau script.
-var bool eff_prev_nogo_done   = false
-var bool eff_prev_solder_done = false
-
-nogo_alert_fires   = eff_enabled and eff_s.nogo_done   and not eff_prev_nogo_done   and not na(eff_s.nogo_value)   and eff_s.nogo_value   >= eff_nogo_thr
-solder_alert_fires = eff_enabled and eff_s.solder_done and not eff_prev_solder_done and not na(eff_s.solder_value) and eff_s.solder_value >= eff_solder_thr
-
-alertcondition(nogo_alert_fires,   title="Efficience NO-GO",   message="Filtre efficience NY au-dessus du seuil No-Go a l'heure gate. Ne pas prendre d'entree contrarienne aujourd'hui.")
-alertcondition(solder_alert_fires, title="Efficience SOLDER", message="Filtre efficience NY au-dessus du seuil Solder a l'heure gate. Envisager de solder le fade en cours.")
-
-// Memorisation pour la prochaine barre (apres evaluation des alertes)
-eff_prev_nogo_done   := eff_s.nogo_done
-eff_prev_solder_done := eff_s.solder_done
+            f_processAmpBar(m1_h, m1_l, m1_t)
