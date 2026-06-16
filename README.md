@@ -346,6 +346,15 @@ Les 2 alertes (`Efficience NO-GO` et `Efficience SOLDER`) se configurent via le 
 
 ## Changelog
 
+### v3.0.1 - 2026-06-16
+
+**Nettoyage cosmétique du dashboard.** Passage de 7 à 6 lignes :
+
+- **Ligne 0 supprimée** (direction `UP`/`DOWN` + état `Figé`/`Dynamique`) : information sans valeur actionable pour le scalp contrarien.
+- **Ligne `Avg` renommée `Amp. NY estimée`** et réduite à une seule valeur (`avg_ny`), qui représente l'amplitude NY attendue pour aujourd'hui (médiane des 5 derniers `ny_amp` × coef d'agitation du jour).
+
+`avg_london` reste calculé en interne (sert toujours pour les coefs London) mais n'est plus affiché — sa valeur est implicite dans les `A1L`/`A2L`/`A1S`/`A2S` affichés quand la session courante = `LON`.
+
 ### v3.0 - 2026-06-16
 
 **Refonte majeure : nouvelle formule `avg` v2 + coefficients v3 par session.** Saut de version 1.20 → 3.0 pour aligner sur la version de la formule de base (socle juin 2026).

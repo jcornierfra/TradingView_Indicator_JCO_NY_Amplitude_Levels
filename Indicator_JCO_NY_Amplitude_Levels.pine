@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 3.0
+// Version: 3.0.1
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -38,6 +38,16 @@
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v3.0.1 - 2026-06-16
+//     - Dashboard : nettoyage cosmetique. Passage de 7 a 6 lignes.
+//       * Ligne 0 supprimee : direction (UP/DOWN) + etat Fige/Dynamique
+//         n'apportent pas d'info actionable pour le scalp contrarien.
+//       * Ligne "Avg" renommee "Amp. NY estimee" et reduite a une seule
+//         valeur (avg_ny), qui est l'amplitude NY attendue pour aujourd'hui.
+//         avg_london reste calcule en interne (sert toujours pour les coefs
+//         London) mais n'est plus affiche - sa valeur est implicite dans
+//         les A1L/A2L/A1S/A2S affiches quand la session courante = LON.
+//
 //   v3.0 - 2026-06-16
 //     - REFONTE MAJEURE : nouvelle formule avg v2 + coefficients v3 par session.
 //       Saut de version 1.20 -> 3.0 pour aligner sur la version de la formule
@@ -1382,14 +1392,10 @@ bool   amp_in_any        = amp_in_london or amp_in_nyam or amp_in_nypm
 string amp_current_label = amp_in_london ? "LON" : amp_in_nyam ? "NYA" : amp_in_nypm ? "NYP" : "HS"
 
 if barstate.islast and show_dash
-    dir_str = is_down ? "DOWN  ▼" : "UP  ▲"
     dir_col = is_down ? color.new(#ff7b72, 0) : color.new(#3fb950, 0)
     amp_str = str.tostring(math.round(use_amp, 1)) + " pts"
 
-    // ===== Dashboard : 3 colonnes (label | Long | Short) sur 9 lignes =====
-    frz_str_s = frozen ? "Fige" : "Dynamique"
-    frz_col_s = frozen ? color.new(#3fb950, 0) : color.new(#c99a2c, 0)
-
+    // ===== Dashboard : 3 colonnes (label | Long | Short) sur 6 lignes =====
     // Valeurs effectives affichees pour la session COURANTE (en points / unites
     // de prix). Hors session : on affiche les valeurs NY AM par defaut.
     float a1l_active = amp_in_london ? amp_london_a1l_eff : amp_in_nypm ? amp_nypm_a1l_eff : amp_nyam_a1l_eff
@@ -1402,50 +1408,46 @@ if barstate.islast and show_dash
     a2s_disp = math.round(a2s_active * amp_pointSize)
 
     var table ts = table.new(
-         position.bottom_right, 3, 7,
+         position.bottom_right, 3, 6,
          bgcolor      = color.new(color.gray, 85),
          border_width = 0)
 
-    // Row 0 : direction (col 0) + etat fige/dynamique (col 2)
-    table.cell(ts, 0, 0, dir_str,    text_color=dir_col,    text_size=size.small)
-    table.cell(ts, 1, 0, "",         text_size=size.small)
-    table.cell(ts, 2, 0, frz_str_s,  text_color=frz_col_s,  text_size=size.small)
-
-    // Row 1 : Amp. Pre-NY (label + valeur) + Auto/Manuel en col 2.
+    // Row 0 : Amp. Pre-NY (label + valeur) + Auto/Manuel en col 2.
     string amp_source_str = amp_auto_ny ? "Auto" : "Manuel"
     color  amp_source_col = amp_auto_ny ? color.new(#3fb950, 0) : color.new(#c99a2c, 0)
-    table.cell(ts, 0, 1, "Amp. Pre-NY",  text_color=color.gray,     text_size=size.small)
-    table.cell(ts, 1, 1, amp_str,        text_color=dir_col,        text_size=size.small)
-    table.cell(ts, 2, 1, amp_source_str, text_color=amp_source_col, text_size=size.small)
+    table.cell(ts, 0, 0, "Amp. Pre-NY",  text_color=color.gray,     text_size=size.small)
+    table.cell(ts, 1, 0, amp_str,        text_color=dir_col,        text_size=size.small)
+    table.cell(ts, 2, 0, amp_source_str, text_color=amp_source_col, text_size=size.small)
 
-    // Row 2 : Amp. Moy. Nd (label + valeur) - moyenne simple des 5 dernieres ny_amp
-    table.cell(ts, 0, 2, "Amp. Moy. " + str.tostring(NWIN) + "d", text_color=color.gray, text_size=size.small)
-    table.cell(ts, 1, 2, str.tostring(math.round(mean_5d_ny)) + " pts",  text_color=color.gray, text_size=size.small)
-    table.cell(ts, 2, 2, "",                                              text_size=size.small)
+    // Row 1 : Amp. Moy. Nd (label + valeur) - moyenne simple des 5 dernieres ny_amp
+    table.cell(ts, 0, 1, "Amp. Moy. " + str.tostring(NWIN) + "d", text_color=color.gray, text_size=size.small)
+    table.cell(ts, 1, 1, str.tostring(math.round(mean_5d_ny)) + " pts",  text_color=color.gray, text_size=size.small)
+    table.cell(ts, 2, 1, "",                                              text_size=size.small)
 
-    // Row 3 : Avg v2 par session (London / NY). Affiches en pts.
-    // Si warmup non termine (< 5 jours d'historique), affiche "..." pour signaler.
-    string avg_lon_str = na(avg_london) ? "..." : str.tostring(math.round(avg_london)) + " pts"
-    string avg_ny_str  = na(avg_ny)     ? "..." : str.tostring(math.round(avg_ny))     + " pts"
-    table.cell(ts, 0, 3, "Avg",         text_color=color.gray, text_size=size.small)
-    table.cell(ts, 1, 3, avg_lon_str,   text_color=color.gray, text_size=size.small)
-    table.cell(ts, 2, 3, avg_ny_str,    text_color=color.gray, text_size=size.small)
+    // Row 2 : Amp. NY estimee pour aujourd'hui = avg_ny (formule v2).
+    // C'est l'amplitude NY attendue pour la session NY (15h30-22h),
+    // calculee comme mediane(5 derniers ny_amp) * coef d'agitation du jour.
+    // Affiche "..." pendant le warmup (< 5 jours d'historique).
+    string avg_ny_str = na(avg_ny) ? "..." : str.tostring(math.round(avg_ny)) + " pts"
+    table.cell(ts, 0, 2, "Amp. NY estimee", text_color=color.gray, text_size=size.small)
+    table.cell(ts, 1, 2, avg_ny_str,        text_color=color.gray, text_size=size.small)
+    table.cell(ts, 2, 2, "",                                       text_size=size.small)
 
-    // Row 4 : header "Long" / "Short" + nom de la session courante
+    // Row 3 : header "Long" / "Short" + nom de la session courante
     // (les valeurs A1/A2 ci-dessous changent selon la session active).
-    table.cell(ts, 0, 4, "Amp. Reco - " + amp_current_label, text_color=color.gray,            text_size=size.small)
-    table.cell(ts, 1, 4, "Long",                             text_color=color.new(#3fb950, 0), text_size=size.small)
-    table.cell(ts, 2, 4, "Short",                            text_color=color.new(#ff7b72, 0), text_size=size.small)
+    table.cell(ts, 0, 3, "Amp. Reco - " + amp_current_label, text_color=color.gray,            text_size=size.small)
+    table.cell(ts, 1, 3, "Long",                             text_color=color.new(#3fb950, 0), text_size=size.small)
+    table.cell(ts, 2, 3, "Short",                            text_color=color.new(#ff7b72, 0), text_size=size.small)
 
-    // Row 5 : A1 (label + A1L + A1S)
-    table.cell(ts, 0, 5, "A1",                              text_color=color.gray,            text_size=size.small)
-    table.cell(ts, 1, 5, str.tostring(a1l_disp) + " pts",   text_color=color.new(#3fb950, 0), text_size=size.small)
-    table.cell(ts, 2, 5, str.tostring(a1s_disp) + " pts",   text_color=color.new(#ff7b72, 0), text_size=size.small)
+    // Row 4 : A1 (label + A1L + A1S)
+    table.cell(ts, 0, 4, "A1",                              text_color=color.gray,            text_size=size.small)
+    table.cell(ts, 1, 4, str.tostring(a1l_disp) + " pts",   text_color=color.new(#3fb950, 0), text_size=size.small)
+    table.cell(ts, 2, 4, str.tostring(a1s_disp) + " pts",   text_color=color.new(#ff7b72, 0), text_size=size.small)
 
-    // Row 6 : A2 (label + A2L + A2S)
-    table.cell(ts, 0, 6, "A2",                              text_color=color.gray,            text_size=size.small)
-    table.cell(ts, 1, 6, str.tostring(a2l_disp) + " pts",   text_color=color.new(#3fb950, 0), text_size=size.small)
-    table.cell(ts, 2, 6, str.tostring(a2s_disp) + " pts",   text_color=color.new(#ff7b72, 0), text_size=size.small)
+    // Row 5 : A2 (label + A2L + A2S)
+    table.cell(ts, 0, 5, "A2",                              text_color=color.gray,            text_size=size.small)
+    table.cell(ts, 1, 5, str.tostring(a2l_disp) + " pts",   text_color=color.new(#3fb950, 0), text_size=size.small)
+    table.cell(ts, 2, 5, str.tostring(a2s_disp) + " pts",   text_color=color.new(#ff7b72, 0), text_size=size.small)
 
 
 // ═══════════════════════════════════════════════════════════════════════════
