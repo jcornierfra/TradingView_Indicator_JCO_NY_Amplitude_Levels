@@ -346,6 +346,25 @@ Les 2 alertes (`Efficience NO-GO` et `Efficience SOLDER`) se configurent via le 
 
 ## Changelog
 
+### v3.1.1 - 2026-06-17
+
+**Dashboard mode Complet : compactage de 13 à 10 lignes.** Le nom de session et le statut de la base avg occupent maintenant la colonne 0 des 2 lignes A1/A2 (au lieu d'une ligne header dédiée).
+
+Layout par session :
+
+| Ligne | Col 0                                                                | Col 1 (Long) | Col 2 (Short) |
+|-------|----------------------------------------------------------------------|--------------|---------------|
+| A1    | `London - A1` (bleu si active, gris sinon)                           | A1L pts      | A1S pts       |
+| A2    | `Fige - A2` (vert) / `Dynamique - A2` (rouge) / `Warmup - A2` (gris) | A2L pts      | A2S pts       |
+
+**Statut affiché** sur la ligne A2 :
+
+- `Fige` (vert) : la base `avg` du jour courant est calculée (figée). `avg_london` figée à 08h00 Paris, `avg_ny` (NY AM + NY PM) figée à 15h30 Paris.
+- `Dynamique` (rouge) : on attend encore le calcul du jour courant (la valeur affichée est celle du jour J-1, encore en évolution).
+- `Warmup` (gris) : moins de 5 jours d'historique disponibles, fallback sur les inputs manuels.
+
+Gain : **-3 lignes** à l'écran, information identique.
+
 ### v3.1.0 - 2026-06-17
 
 **Dashboard à 3 modes** (remplace le toggle bool par une liste déroulante) :

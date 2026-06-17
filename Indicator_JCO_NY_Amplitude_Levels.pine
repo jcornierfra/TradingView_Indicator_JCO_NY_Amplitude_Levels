@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 3.1.0
+// Version: 3.1.1
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -38,6 +38,17 @@
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v3.1.1 - 2026-06-17
+//     - Dashboard / mode Complet : compactage de 13 a 10 lignes. Le nom de
+//       session et le statut de la base avg occupent maintenant la colonne 0
+//       des 2 lignes A1/A2 (au lieu d'une ligne header dediee). Layout par
+//       session :
+//         London - A1 (bleu si active, gris sinon) | A1L | A1S
+//         Fige - A2   (vert si avg figee, rouge si dynamique) | A2L | A2S
+//       Statut affiche : "Fige" / "Dynamique" / "Warmup" selon l'etat de
+//       avg_london (figee a 08h00 Paris) et avg_ny (figee a 15h30, partagee
+//       par NY AM et NY PM). Gain : -3 lignes a l'ecran, info identique.
+//
 //   v3.1.0 - 2026-06-17
 //     - Dashboard : retour a 3 modes (Masque / Simple / Complet) via une liste
 //       deroulante en remplacement du toggle bool.
@@ -477,10 +488,12 @@ nypm_coef_a2s     = input.float(0.250, "Coef A2S NY PM (espacement short)",  min
 //   Masque  : aucun dashboard.
 //   Simple  : 6 lignes - infos Pre-NY + Avg NY estimee + amplitudes A1/A2 de la
 //             session COURANTE (titre de la session en bleu si une est active).
-//   Complet : 12 lignes - meme entete + bloc A1/A2 dedie pour chacune des 3
-//             sessions (London / NY AM / NY PM). Le titre de la session
-//             actuellement active sur le graphique passe en bleu pour reperer
-//             d'un coup d'oeil quelles amplitudes sont appliquees aux marques.
+//   Complet : 10 lignes - meme entete + 2 lignes A1/A2 par session, avec en
+//             col 0 le nom de la session (ligne A1, bleu si active sur le
+//             graphique) et le statut de la base avg (ligne A2 : "Fige" vert,
+//             "Dynamique" rouge, "Warmup" gris). Permet de voir en un coup
+//             d'oeil quelles amplitudes pilotent les marques en cours et si
+//             la base avg est figee pour aujourd'hui.
 grp_dash  = "Dashboard"
 dash_mode = input.string("Simple", "Mode dashboard",
               options=["Masque", "Simple", "Complet"],
@@ -1500,12 +1513,18 @@ if barstate.islast
             table.cell(ts_simple, 1, 5, str.tostring(a2l_disp) + " pts", text_color=c_green, text_size=size.small)
             table.cell(ts_simple, 2, 5, str.tostring(a2s_disp) + " pts", text_color=c_red,   text_size=size.small)
         else
-            // Mode Complet : 12 lignes = 3 communes + 3 sessions x 3 lignes (header + A1 + A2).
+            // Mode Complet : 10 lignes = 3 communes + 1 header Long/Short global
+            // + 3 sessions x 2 lignes. Chaque session occupe 2 lignes :
+            //   - Ligne A1 : col 0 = "<Session> - A1" (couleur bleue si la
+            //     session est active sur le graphique, gris sinon)
+            //   - Ligne A2 : col 0 = "<Statut> - A2" (couleur verte si la base
+            //     avg du jour est figee, rouge si encore en evolution, grise
+            //     en warmup). Statut = "Fige" / "Dynamique" / "Warmup".
             if not na(ts_simple)
                 table.delete(ts_simple)
                 ts_simple := na
             if na(ts_full)
-                ts_full := table.new(position.bottom_right, 3, 12,
+                ts_full := table.new(position.bottom_right, 3, 10,
                                      bgcolor=color.new(color.gray, 85), border_width=0)
 
             float lon_a1l = math.round(amp_london_a1l_eff * amp_pointSize)
@@ -1521,6 +1540,17 @@ if barstate.islast
             float nyp_a2l = math.round(amp_nypm_a2l_eff   * amp_pointSize)
             float nyp_a2s = math.round(amp_nypm_a2s_eff   * amp_pointSize)
 
+            // Statut "Fige" (vert) / "Dynamique" (rouge) par base avg.
+            // avg_london est figee a 8h00 Paris (fermeture prelondon), avg_ny
+            // est figee a 15h30 (fermeture preny). Avant ces heures, la valeur
+            // affichee est celle du jour J-1 (encore en evolution pour J). En
+            // warmup (avg = na), statut "Warmup" gris. NY PM partage avg_ny
+            // donc herite du meme statut que NY AM.
+            string lon_st     = na(avg_london) ? "Warmup" : parisMinsTrack >= 480 ? "Fige" : "Dynamique"
+            string ny_st      = na(avg_ny)     ? "Warmup" : parisMinsTrack >= 930 ? "Fige" : "Dynamique"
+            color  lon_st_col = na(avg_london) ? color.gray : (parisMinsTrack >= 480 ? c_green : c_red)
+            color  ny_st_col  = na(avg_ny)     ? color.gray : (parisMinsTrack >= 930 ? c_green : c_red)
+
             // Row 0 : Amp. Pre-NY (label + valeur) + Auto/Manuel
             table.cell(ts_full, 0, 0, "Amp. Pre-NY",  text_color=color.gray,     text_size=size.small)
             table.cell(ts_full, 1, 0, amp_str,        text_color=dir_col,        text_size=size.small)
@@ -1534,38 +1564,35 @@ if barstate.islast
             table.cell(ts_full, 1, 2, avg_ny_str,        text_color=color.gray, text_size=size.small)
             table.cell(ts_full, 2, 2, "",                                       text_size=size.small)
 
-            // Rows 3-5 : London (header bleu si la session est active)
-            table.cell(ts_full, 0, 3, "London", text_color=london_hdr, text_size=size.small)
-            table.cell(ts_full, 1, 3, "Long",   text_color=c_green,    text_size=size.small)
-            table.cell(ts_full, 2, 3, "Short",  text_color=c_red,      text_size=size.small)
-            table.cell(ts_full, 0, 4, "A1", text_color=color.gray, text_size=size.small)
+            // Row 3 : header global Long / Short (une seule fois, valable pour
+            // les 3 blocs sessions ci-dessous).
+            table.cell(ts_full, 0, 3, "",      text_size=size.small)
+            table.cell(ts_full, 1, 3, "Long",  text_color=c_green, text_size=size.small)
+            table.cell(ts_full, 2, 3, "Short", text_color=c_red,   text_size=size.small)
+
+            // Rows 4-5 : London (A1 = nom session + statut bleu/gris, A2 = statut Fige/Dynamique vert/rouge)
+            table.cell(ts_full, 0, 4, "London - A1",         text_color=london_hdr, text_size=size.small)
             table.cell(ts_full, 1, 4, str.tostring(lon_a1l) + " pts", text_color=c_green, text_size=size.small)
             table.cell(ts_full, 2, 4, str.tostring(lon_a1s) + " pts", text_color=c_red,   text_size=size.small)
-            table.cell(ts_full, 0, 5, "A2", text_color=color.gray, text_size=size.small)
+            table.cell(ts_full, 0, 5, lon_st + " - A2",      text_color=lon_st_col, text_size=size.small)
             table.cell(ts_full, 1, 5, str.tostring(lon_a2l) + " pts", text_color=c_green, text_size=size.small)
             table.cell(ts_full, 2, 5, str.tostring(lon_a2s) + " pts", text_color=c_red,   text_size=size.small)
 
-            // Rows 6-8 : NY AM
-            table.cell(ts_full, 0, 6, "NY AM", text_color=nyam_hdr, text_size=size.small)
-            table.cell(ts_full, 1, 6, "Long",  text_color=c_green,  text_size=size.small)
-            table.cell(ts_full, 2, 6, "Short", text_color=c_red,    text_size=size.small)
-            table.cell(ts_full, 0, 7, "A1", text_color=color.gray, text_size=size.small)
-            table.cell(ts_full, 1, 7, str.tostring(nya_a1l) + " pts", text_color=c_green, text_size=size.small)
-            table.cell(ts_full, 2, 7, str.tostring(nya_a1s) + " pts", text_color=c_red,   text_size=size.small)
-            table.cell(ts_full, 0, 8, "A2", text_color=color.gray, text_size=size.small)
-            table.cell(ts_full, 1, 8, str.tostring(nya_a2l) + " pts", text_color=c_green, text_size=size.small)
-            table.cell(ts_full, 2, 8, str.tostring(nya_a2s) + " pts", text_color=c_red,   text_size=size.small)
+            // Rows 6-7 : NY AM
+            table.cell(ts_full, 0, 6, "NY AM - A1",          text_color=nyam_hdr,  text_size=size.small)
+            table.cell(ts_full, 1, 6, str.tostring(nya_a1l) + " pts", text_color=c_green, text_size=size.small)
+            table.cell(ts_full, 2, 6, str.tostring(nya_a1s) + " pts", text_color=c_red,   text_size=size.small)
+            table.cell(ts_full, 0, 7, ny_st + " - A2",       text_color=ny_st_col, text_size=size.small)
+            table.cell(ts_full, 1, 7, str.tostring(nya_a2l) + " pts", text_color=c_green, text_size=size.small)
+            table.cell(ts_full, 2, 7, str.tostring(nya_a2s) + " pts", text_color=c_red,   text_size=size.small)
 
-            // Rows 9-11 : NY PM
-            table.cell(ts_full, 0,  9, "NY PM", text_color=nypm_hdr, text_size=size.small)
-            table.cell(ts_full, 1,  9, "Long",  text_color=c_green,  text_size=size.small)
-            table.cell(ts_full, 2,  9, "Short", text_color=c_red,    text_size=size.small)
-            table.cell(ts_full, 0, 10, "A1", text_color=color.gray, text_size=size.small)
-            table.cell(ts_full, 1, 10, str.tostring(nyp_a1l) + " pts", text_color=c_green, text_size=size.small)
-            table.cell(ts_full, 2, 10, str.tostring(nyp_a1s) + " pts", text_color=c_red,   text_size=size.small)
-            table.cell(ts_full, 0, 11, "A2", text_color=color.gray, text_size=size.small)
-            table.cell(ts_full, 1, 11, str.tostring(nyp_a2l) + " pts", text_color=c_green, text_size=size.small)
-            table.cell(ts_full, 2, 11, str.tostring(nyp_a2s) + " pts", text_color=c_red,   text_size=size.small)
+            // Rows 8-9 : NY PM (statut identique a NY AM, base avg_ny commune)
+            table.cell(ts_full, 0, 8, "NY PM - A1",          text_color=nypm_hdr,  text_size=size.small)
+            table.cell(ts_full, 1, 8, str.tostring(nyp_a1l) + " pts", text_color=c_green, text_size=size.small)
+            table.cell(ts_full, 2, 8, str.tostring(nyp_a1s) + " pts", text_color=c_red,   text_size=size.small)
+            table.cell(ts_full, 0, 9, ny_st + " - A2",       text_color=ny_st_col, text_size=size.small)
+            table.cell(ts_full, 1, 9, str.tostring(nyp_a2l) + " pts", text_color=c_green, text_size=size.small)
+            table.cell(ts_full, 2, 9, str.tostring(nyp_a2s) + " pts", text_color=c_red,   text_size=size.small)
 
 
 // ═══════════════════════════════════════════════════════════════════════════
