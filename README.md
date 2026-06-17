@@ -346,6 +346,28 @@ Les 2 alertes (`Efficience NO-GO` et `Efficience SOLDER`) se configurent via le 
 
 ## Changelog
 
+### v3.1.2 - 2026-06-17
+
+**Formule `avg` v2 : calcul live pendant la pré-amplitude.**
+
+Avant cette version, `avg_ny` et `avg_london` restaient figés sur la valeur du jour J-1 jusqu'à leur recalcul ponctuel (15h30 pour `avg_ny`, 08h00 pour `avg_london`). Le dashboard et la state machine voyaient donc une amplitude estimée qui ne reflétait pas le jour courant pendant toute la matinée.
+
+**Désormais** : `avg` recalculé à **chaque bougie** tant que la pré-amplitude est en construction (`in_preny` / `in_prelondon`). La formule reste identique :
+
+```
+preamp_live  = preny_high_courant - preny_low_courant   (idem pour prelondon)
+base         = médiane(5j amp_session)
+coef         = preamp_live / médiane(5j preamp)
+coef_borné   = max(0.5, min(2.0, coef))
+avg          = base × coef_borné
+```
+
+Sur la dernière bougie `in_preny` (= 15h29), la valeur live = la valeur qui sera figée à 15h30 → continuité garantie. Après le figement (15h30 / 08h00) : comportement **inchangé** (avg figé pour la journée jusqu'au prochain recalcul).
+
+**Impact sur les marques** : la state machine voit des seuils qui s'affinent au fil de la matinée. Les marques **déjà tracées ne bougent pas** (`line.new` fige le `triggerPrice` au moment du trigger) ; seuls les nouveaux triggers à venir bénéficient de l'amplitude actualisée. Concrètement, entre 13h30 et 15h30 les marques NY AM sont pilotées par une estimation qui se rapproche de la vraie valeur du jour, au lieu de celle de la veille.
+
+Le statut **`Dynamique`** sur le dashboard mode Complet garde son sens : "calcul en cours d'évolution, pas encore figé pour la journée".
+
 ### v3.1.1 - 2026-06-17
 
 **Dashboard mode Complet : compactage de 13 à 10 lignes.** Le nom de session et le statut de la base avg occupent maintenant la colonne 0 des 2 lignes A1/A2 (au lieu d'une ligne header dédiée).

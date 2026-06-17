@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 3.1.1
+// Version: 3.1.2
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -38,6 +38,30 @@
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v3.1.2 - 2026-06-17
+//     - Formule avg v2 : calcul "live" pendant la fenetre pre-amplitude.
+//       Avant : avg_ny et avg_london restaient figes sur la valeur du jour
+//       J-1 jusqu'a leur recalcul ponctuel (15h30 pour avg_ny, 08h00 pour
+//       avg_london). Le dashboard affichait donc une amplitude estimee qui
+//       ne reflechissait pas le jour courant pendant toute la matinee.
+//       Apres : avg recalcule a chaque bougie tant que la pre-amplitude est
+//       active (in_preny / in_prelondon). La formule reste identique :
+//       base = mediane(5j amp_session), coef = preamp_live / mediane(5j preamp),
+//       coef borne [0.5, 2.0]. preamp_live = preny_h - preny_l a l'instant t
+//       (idem prelondon). Sur la derniere bougie in_preny (= 15h29), la
+//       valeur live = la valeur qui sera figee a 15h30, donc continuite.
+//       Apres 15h30 / 08h00 : comportement INCHANGE (avg fige pour la
+//       journee jusqu'au prochain figement).
+//     - Impact sur les marques : la state machine voit des seuils qui
+//       s'affinent au fil de la matinee. Les marques DEJA tracees ne bougent
+//       pas (line.new fige le triggerPrice au moment du trigger) ; seuls les
+//       nouveaux triggers a venir benificient de l'amplitude actualisee.
+//       Concretement, entre 13h30 et 15h30 les marques NY AM sont pilotees
+//       par une estimation qui se rapproche de la vraie valeur du jour, au
+//       lieu de celle de la veille.
+//     - Le statut "Dynamique" sur le dashboard mode Complet garde son sens :
+//       "calcul en cours d'evolution, pas encore fige pour la journee".
+//
 //   v3.1.1 - 2026-06-17
 //     - Dashboard / mode Complet : compactage de 13 a 10 lignes. Le nom de
 //       session et le statut de la base avg occupent maintenant la colonne 0
@@ -952,10 +976,14 @@ else if ny_active
     ny_l := na
     ny_active := false
 
-// Brique Pre-NY (0h - 15h29). A la fermeture (= 15h30, ouverture NY AM), on
-// calcule avg_ny pour la journee AVANT de pousser preny_amp_J dans l'historique.
-// Cela garantit que array.median(preny_amp_hist) = mediane des 5 jours PRECEDENTS
-// (sans contaminer par le jour J).
+// Brique Pre-NY (0h - 15h29). Calcul avg_ny en continu pendant la fenetre
+// (live update a chaque bougie), puis fige a 15h30 lors de la fermeture.
+// Avantage : le dashboard et la state machine voient une estimation qui
+// s'affine au fil de la matinee, au lieu de rester collee a la valeur de
+// J-1 jusqu'au prochain figement. Sur la derniere bougie in_preny, la
+// valeur live = la valeur qui sera figee a 15h30, donc continuite assuree.
+// Les marques DEJA tracees ne bougent pas (line.new fige le triggerPrice) ;
+// seuls les nouveaux triggers benificient de l'amplitude actualisee.
 if in_preny
     if not preny_active
         preny_h := high
@@ -964,15 +992,18 @@ if in_preny
     else
         preny_h := math.max(preny_h, high)
         preny_l := math.min(preny_l, low)
-else if preny_active
-    float preny_amp_J = preny_h - preny_l
     if array.size(ny_amp_hist) >= NWIN and array.size(preny_amp_hist) >= NWIN
+        float preny_amp_live = preny_h - preny_l
         float base = array.median(ny_amp_hist)
         float med  = array.median(preny_amp_hist)
-        float coef = med > 0 ? preny_amp_J / med : 1.0
+        float coef = med > 0 ? preny_amp_live / med : 1.0
         coef := math.max(0.5, math.min(2.0, coef))
         avg_ny := base * coef
-    array.push(preny_amp_hist, preny_amp_J)
+else if preny_active
+    // Fermeture (15h30) : on push la pre-amplitude finale dans l'historique
+    // POST-figement de avg_ny (deja a jour grace au live), pour que la
+    // mediane des 5 derniers preny ne contienne pas le jour J.
+    array.push(preny_amp_hist, preny_h - preny_l)
     if array.size(preny_amp_hist) > NWIN
         array.shift(preny_amp_hist)
     preny_h := na
@@ -996,8 +1027,8 @@ else if london_active
     london_l := na
     london_active := false
 
-// Brique Pre-London (0h - 7h59). A la fermeture (= 8h00, ouverture London), on
-// calcule avg_london pour la journee AVANT de pousser prelondon_amp_J dans l'hist.
+// Brique Pre-London (0h - 7h59). Idem que Pre-NY : calcul avg_london en
+// continu pendant la fenetre, puis fige a 08h00 (fermeture prelondon).
 if in_prelondon
     if not prelondon_active
         prelondon_h := high
@@ -1006,15 +1037,15 @@ if in_prelondon
     else
         prelondon_h := math.max(prelondon_h, high)
         prelondon_l := math.min(prelondon_l, low)
-else if prelondon_active
-    float prelondon_amp_J = prelondon_h - prelondon_l
     if array.size(london_amp_hist) >= NWIN and array.size(prelondon_amp_hist) >= NWIN
+        float prelondon_amp_live = prelondon_h - prelondon_l
         float base = array.median(london_amp_hist)
         float med  = array.median(prelondon_amp_hist)
-        float coef = med > 0 ? prelondon_amp_J / med : 1.0
+        float coef = med > 0 ? prelondon_amp_live / med : 1.0
         coef := math.max(0.5, math.min(2.0, coef))
         avg_london := base * coef
-    array.push(prelondon_amp_hist, prelondon_amp_J)
+else if prelondon_active
+    array.push(prelondon_amp_hist, prelondon_h - prelondon_l)
     if array.size(prelondon_amp_hist) > NWIN
         array.shift(prelondon_amp_hist)
     prelondon_h := na
