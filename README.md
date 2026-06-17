@@ -346,6 +346,18 @@ Les 2 alertes (`Efficience NO-GO` et `Efficience SOLDER`) se configurent via le 
 
 ## Changelog
 
+### v3.1.0 - 2026-06-17
+
+**Dashboard à 3 modes** (remplace le toggle bool par une liste déroulante) :
+
+- **Masqué** : aucun dashboard affiché.
+- **Simple** : 6 lignes (= mode v3.0.1). La cellule session affiche maintenant le nom long (`London` / `NY AM` / `NY PM` / `Hors session`) et passe en **bleu** quand une session est active sur le graphique.
+- **Complet** : 12 lignes — entête commune (Pre-NY / Moy. 5d / NY estimée) + un bloc dédié pour **chaque session** avec ses valeurs `A1L`/`A1S`/`A2L`/`A2S`. Le titre de la session **actuellement active** sur le graphique passe en bleu, les 2 autres restent en gris → on voit d'un coup d'œil quelles amplitudes pilotent les marques en cours.
+
+Switch de mode propre au runtime (les tables sont supprimées et recréées sans avoir à recharger l'indicateur).
+
+**Greffon** : épaisseur des marques d'amplitude (`amp_lineWidth`) passe de **2 à 3** par défaut pour améliorer la visibilité sur le graphique.
+
 ### v3.0.1 - 2026-06-16
 
 **Nettoyage cosmétique du dashboard.** Passage de 7 à 6 lignes :
