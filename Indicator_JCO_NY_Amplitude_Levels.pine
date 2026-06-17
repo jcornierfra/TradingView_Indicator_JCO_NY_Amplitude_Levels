@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 3.1.2
+// Version: 3.1.3
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -38,6 +38,29 @@
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v3.1.3 - 2026-06-17
+//     - Greffon / fix decalage des marques : la fonction f_drawAmpMarker passe
+//       de xloc.bar_time a xloc.bar_index pour ancrer les marques sur la
+//       bougie chart courante au lieu du timestamp brut de la M1 qui a
+//       declenche. Sur des TF > M1 (ex M5), le timestamp M1 etait a un
+//       offset variable dans la bougie chart : si la M1 du trigger tombait
+//       en fin de bougie (ex M1 de 14h04 dans une bougie M5 14h00-14h05),
+//       la marque centree sur ce timestamp debordait largement sur la
+//       bougie suivante (pas encore dessinee en live, d'ou l'impression
+//       qu'elle s'affichait sur du vide a droite).
+//     - Avec xloc.bar_index, la marque est toujours centree sur la bougie
+//       chart courante quel que soit le moment du trigger M1 dans la
+//       bougie. Comportement deterministe sur toutes les TF.
+//     - Le mapping de markerWidthBars (input.float) -> largeur en bougies
+//       change legerement :
+//         markerWidthBars <= 1.0 : marque sur 1 bougie (la courante)
+//         1.0 < markerWidthBars <= 3.0 : 3 bougies (preced + courante + suiv)
+//         markerWidthBars >= 4.0 : 5 bougies, etc. (halfBars = floor(/2))
+//       Avec le defaut markerWidthBars=2, la marque fait 3 bougies de
+//       large, symetrique autour de la bougie courante. Si zero debordement
+//       est souhaite (notamment sur la derniere bougie en live), passer
+//       markerWidthBars a 1 -> marque sur 1 bougie pile.
+//
 //   v3.1.2 - 2026-06-17
 //     - Formule avg v2 : calcul "live" pendant la fenetre pre-amplitude.
 //       Avant : avg_ny et avg_london restaient figes sur la valeur du jour
@@ -1681,13 +1704,24 @@ var array<int>   amp_hist_t = array.new<int>()
 const int AMP_MAX_HIST = 200
 
 // === Helper de dessin (trait horizontal au prix de declenchement) ===
+// La marque est ancree sur bar_index (xloc.bar_index) au lieu du timestamp M1
+// brut (xloc.bar_time). Avec bar_time, la marque centree sur t = timestamp M1
+// debordait differemment selon ou la M1 tombait dans la bougie chart : en M5,
+// un trigger M1 a la fin d'une bougie (ex M1 de 14h04 dans bougie 14h00-14h05)
+// donnait une marque qui debordait largement sur la bougie suivante. Avec
+// bar_index, la marque est toujours centree sur la bougie chart courante,
+// independamment du timestamp exact du trigger M1 dans la bougie.
+// Mapping markerWidthBars (input.float) -> largeur en bougies chart :
+//   markerWidthBars <= 1 -> 1 bougie (juste la courante)
+//   1 < markerWidthBars <= 3 -> 3 bougies (preced + courante + suiv)
+//   markerWidthBars >= 4 -> 5 bougies, etc. (halfBars = floor(markerWidthBars/2))
+// Le parametre t reste pour compatibilite de signature.
 f_drawAmpMarker(triggerPrice, useBearColor, t) =>
-    tfSec = timeframe.in_seconds(timeframe.period)
-    tfMs  = (tfSec > 0 ? tfSec : 60) * 1000
-    halfW = int(math.round(tfMs * markerWidthBars / 2.0))
-    col   = useBearColor ? amp_bearColor : amp_bullColor
-    line.new(x1=t - halfW, y1=triggerPrice, x2=t + halfW, y2=triggerPrice,
-             xloc=xloc.bar_time, color=col, width=amp_lineWidth)
+    int halfBars = int(markerWidthBars / 2)
+    col = useBearColor ? amp_bearColor : amp_bullColor
+    line.new(x1=bar_index - halfBars, y1=triggerPrice,
+             x2=bar_index + halfBars, y2=triggerPrice,
+             xloc=xloc.bar_index, color=col, width=amp_lineWidth)
 
 // === Traitement d'une bougie M1 ===
 f_processAmpBar(float h, float l, int t) =>

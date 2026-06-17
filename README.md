@@ -346,6 +346,24 @@ Les 2 alertes (`Efficience NO-GO` et `Efficience SOLDER`) se configurent via le 
 
 ## Changelog
 
+### v3.1.3 - 2026-06-17
+
+**Fix décalage des marques d'amplitude.** Sur des TF supérieures à M1 (typiquement M5), les marques pouvaient être décalées d'une bougie vers la droite, donnant l'impression qu'elles s'affichaient sur une bougie "future" pas encore dessinée.
+
+**Cause** : la fonction `f_drawAmpMarker` ancrait la marque sur `xloc.bar_time` avec `t` = timestamp brut de la M1 qui a déclenché. Comme les triggers M1 ne tombent presque jamais sur un boundary de la bougie chart, la marque débordait des 2 côtés et le débordement à droite était particulièrement visible en live (bougie suivante non encore créée).
+
+**Fix** : passage en `xloc.bar_index`. La marque est désormais ancrée sur le `bar_index` de la bougie chart courante, indépendamment du timestamp exact du trigger M1 dans la bougie. Comportement déterministe sur toutes les TF.
+
+**Impact sur `markerWidthBars`** : le mapping de l'input vers la largeur effective change légèrement :
+
+| `markerWidthBars` | Largeur (bougies)                              |
+| ----------------- | ---------------------------------------------- |
+| `<= 1.0`          | 1 bougie (la courante uniquement)              |
+| `1.0 < x <= 3.0`  | 3 bougies (précédente + courante + suivante)   |
+| `>= 4.0`          | 5 bougies, etc. (`halfBars = floor(x/2)`)      |
+
+Avec le défaut `markerWidthBars=2`, la marque fait 3 bougies de large, symétrique autour de la bougie courante. Pour zéro débordement (notamment sur la dernière bougie en live), passer `markerWidthBars` à **1** → marque exactement sur 1 bougie.
+
 ### v3.1.2 - 2026-06-17
 
 **Formule `avg` v2 : calcul live pendant la pré-amplitude.**
