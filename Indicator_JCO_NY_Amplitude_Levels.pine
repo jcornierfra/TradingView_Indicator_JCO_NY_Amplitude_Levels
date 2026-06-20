@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 3.1.3
+// Version: 3.1.4
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -38,6 +38,30 @@
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v3.1.4 - 2026-06-18
+//     - Greffon : nouvelle option "Style des marques" avec 2 valeurs
+//       Trait - defaut, comportement existant ou Rectangle - nouveau.
+//     - Style "Rectangle" : box semi-transparente 80% qui visualise
+//       l'amplitude reelle parcourue avant le declenchement de la marque.
+//       Pour chaque trigger :
+//         * Phase 1 - 1ere marque du jour : du swing detecte au prix du
+//           trigger A1.
+//         * Phase 2 reversal : du refExtreme - sommet/creux de la jambe
+//           precedente au prix du revTrigger.
+//         * Phase 2 continuation : de l'oppExtreme - bas/haut du
+//           retracement au prix du contTrigger.
+//       La box couvre en x la bougie ou le point de reference s'est
+//       passe jusqu'a la bougie ou la marque est tracee. Couleur verte
+//       pour signal achat - direction "down", rouge pour signal vente -
+//       direction "up".
+//     - Tracking ajoute : 2 nouveaux champs UDT AmpState.refExtremeTime
+//       et AmpState.oppExtremeTime memorisent quand chaque point de
+//       reference a ete atteint. Mis a jour a chaque update des extremes
+//       en Phase 2. Permet de tracer la box de la bonne ancre temporelle.
+//     - max_boxes_count=500 ajoute a la declaration indicator() pour
+//       eviter de hitter la limite par defaut 50 sur une journee chargee
+//       en mode Rectangle.
+//
 //   v3.1.3 - 2026-06-17
 //     - Greffon / fix decalage des marques : la fonction f_drawAmpMarker passe
 //       de xloc.bar_time a xloc.bar_index pour ancrer les marques sur la
@@ -473,7 +497,7 @@
 //     - Initial release
 
 //@version=6
-indicator("JCO NY Amplitude Levels", shorttitle="JCO NY Amplitude Levels", overlay=true, max_lines_count=500)
+indicator("JCO NY Amplitude Levels", shorttitle="JCO NY Amplitude Levels", overlay=true, max_lines_count=500, max_boxes_count=500)
 
 // ── Reference horaire ────────────────────────────────────────────────────────
 // Timezone unique appliquee a tous les timings : 3 sessions du greffon
@@ -661,6 +685,7 @@ amp1S_Pts       = input.float(100,  "A1S (Amp1 Short - reversal short) - ignore 
 amp2L_Pts       = input.float(127,  "A2L (Amp2 Long  - continuation long)  - ignore si Auto NY", minval=1, group=grp_marks)
 amp2S_Pts       = input.float(77,   "A2S (Amp2 Short - continuation short) - ignore si Auto NY", minval=1, group=grp_marks)
 amp_pointSize   = input.float(1.0,  "Prix par point (NQ/MNQ/ES = 1)", minval=0.01, step=0.05, group=grp_marks)
+amp_markerStyle = input.string("Trait", "Style des marques", options=["Trait","Rectangle"], group=grp_marks)
 amp_swingMode   = input.string("Duree",   "Methode detection swing", options=["Bougies","Duree"], group=grp_marks)
 amp_leftBars    = input.int(3,      "Swing left bars - mode Bougies",  minval=1, maxval=20, group=grp_marks)
 amp_rightBars   = input.int(3,      "Swing right bars - mode Bougies", minval=1, maxval=20, group=grp_marks)
@@ -1664,7 +1689,9 @@ type AmpState
     string direction       // "up" (marque rouge) | "down" (marque verte)
     float  origin
     float  refExtreme
+    int    refExtremeTime  // timestamp ou refExtreme a ete atteint - pour rectangle reversal
     float  oppExtreme
+    int    oppExtremeTime  // timestamp ou oppExtreme a ete atteint - pour rectangle continuation
     float  localOpp
     float  recoveryExt
     bool   retracementSeen
@@ -1683,7 +1710,9 @@ var AmpState amp_s = AmpState.new(
      direction       = na,
      origin          = na,
      refExtreme      = na,
+     refExtremeTime  = na,
      oppExtreme      = na,
+     oppExtremeTime  = na,
      localOpp        = na,
      recoveryExt     = na,
      retracementSeen = false,
@@ -1703,25 +1732,31 @@ var array<float> amp_hist_l = array.new<float>()
 var array<int>   amp_hist_t = array.new<int>()
 const int AMP_MAX_HIST = 200
 
-// === Helper de dessin (trait horizontal au prix de declenchement) ===
-// La marque est ancree sur bar_index (xloc.bar_index) au lieu du timestamp M1
-// brut (xloc.bar_time). Avec bar_time, la marque centree sur t = timestamp M1
-// debordait differemment selon ou la M1 tombait dans la bougie chart : en M5,
-// un trigger M1 a la fin d'une bougie (ex M1 de 14h04 dans bougie 14h00-14h05)
-// donnait une marque qui debordait largement sur la bougie suivante. Avec
-// bar_index, la marque est toujours centree sur la bougie chart courante,
-// independamment du timestamp exact du trigger M1 dans la bougie.
-// Mapping markerWidthBars (input.float) -> largeur en bougies chart :
-//   markerWidthBars <= 1 -> 1 bougie (juste la courante)
-//   1 < markerWidthBars <= 3 -> 3 bougies (preced + courante + suiv)
-//   markerWidthBars >= 4 -> 5 bougies, etc. (halfBars = floor(markerWidthBars/2))
-// Le parametre t reste pour compatibilite de signature.
-f_drawAmpMarker(triggerPrice, useBearColor, t) =>
-    int halfBars = int(markerWidthBars / 2)
-    col = useBearColor ? amp_bearColor : amp_bullColor
-    line.new(x1=bar_index - halfBars, y1=triggerPrice,
-             x2=bar_index + halfBars, y2=triggerPrice,
-             xloc=xloc.bar_index, color=col, width=amp_lineWidth)
+// === Helper de dessin (style configurable : trait ou rectangle) ===
+// Style "Trait" : ligne horizontale au prix de declenchement, ancree sur
+// bar_index pour eviter le decalage qui apparaissait avec xloc.bar_time
+// quand le timestamp M1 du trigger ne tombait pas sur un boundary de bougie
+// chart (notamment en TF > M1).
+// Style "Rectangle" : box semi-transparente qui visualise l'amplitude
+// reelle - du swing/refExtreme/oppExtreme jusqu'au prix du trigger, en
+// largeur de la bougie ou le swing s'est passe a la bougie ou la marque
+// est tracee. Verte pour signal achat - direction "down", rouge pour
+// signal vente - direction "up".
+f_drawAmpMarker(triggerPrice, useBearColor, swingPrice, swingTime) =>
+    col_base = useBearColor ? amp_bearColor : amp_bullColor
+    if amp_markerStyle == "Trait"
+        int halfBars = int(markerWidthBars / 2)
+        line ln_drawn = line.new(x1=bar_index - halfBars, y1=triggerPrice,
+                                  x2=bar_index + halfBars, y2=triggerPrice,
+                                  xloc=xloc.bar_index, color=col_base, width=amp_lineWidth)
+        int _ret = 0
+    else
+        color col_box = color.new(col_base, 80)
+        box bx_drawn = box.new(left=swingTime, top=math.max(swingPrice, triggerPrice),
+                                right=time, bottom=math.min(swingPrice, triggerPrice),
+                                xloc=xloc.bar_time,
+                                bgcolor=col_box, border_color=col_box)
+        int _ret = 0
 
 // === Traitement d'une bougie M1 ===
 f_processAmpBar(float h, float l, int t) =>
@@ -1743,7 +1778,9 @@ f_processAmpBar(float h, float l, int t) =>
         amp_s.direction       := na
         amp_s.origin          := na
         amp_s.refExtreme      := na
+        amp_s.refExtremeTime  := na
         amp_s.oppExtreme      := na
+        amp_s.oppExtremeTime  := na
         amp_s.localOpp        := na
         amp_s.recoveryExt     := na
         amp_s.retracementSeen := false
@@ -1778,7 +1815,9 @@ f_processAmpBar(float h, float l, int t) =>
         amp_s.direction       := na
         amp_s.origin          := na
         amp_s.refExtreme      := na
+        amp_s.refExtremeTime  := na
         amp_s.oppExtreme      := na
+        amp_s.oppExtremeTime  := na
         amp_s.localOpp        := na
         amp_s.recoveryExt     := na
         amp_s.retracementSeen := false
@@ -1901,24 +1940,28 @@ f_processAmpBar(float h, float l, int t) =>
 
         if bullTriggered
             if inWindow and bullTrigger >= l and bullTrigger <= h
-                f_drawAmpMarker(bullTrigger, true, t)
+                f_drawAmpMarker(bullTrigger, true, amp_s.swingLow, amp_s.swingLowTime)
             amp_s.phase           := "tracking"
             amp_s.direction       := "up"
             amp_s.origin          := amp_s.swingLow
             amp_s.refExtreme      := bullTrigger
+            amp_s.refExtremeTime  := t
             amp_s.oppExtreme      := bullTrigger
+            amp_s.oppExtremeTime  := t
             amp_s.localOpp        := bullTrigger
             amp_s.recoveryExt     := bullTrigger
             amp_s.retracementSeen := false
             amp_s.currentPath     := "amp2"
         else if bearTriggered
             if inWindow and bearTrigger >= l and bearTrigger <= h
-                f_drawAmpMarker(bearTrigger, false, t)
+                f_drawAmpMarker(bearTrigger, false, amp_s.swingHigh, amp_s.swingHighTime)
             amp_s.phase           := "tracking"
             amp_s.direction       := "down"
             amp_s.origin          := amp_s.swingHigh
             amp_s.refExtreme      := bearTrigger
+            amp_s.refExtremeTime  := t
             amp_s.oppExtreme      := bearTrigger
+            amp_s.oppExtremeTime  := t
             amp_s.localOpp        := bearTrigger
             amp_s.recoveryExt     := bearTrigger
             amp_s.retracementSeen := false
@@ -1929,12 +1972,14 @@ f_processAmpBar(float h, float l, int t) =>
         bool oppDropped = false
         if amp_s.direction == "up"
             if h > amp_s.refExtreme
-                amp_s.refExtreme := h
-                amp_s.localOpp   := amp_s.refExtreme
+                amp_s.refExtreme     := h
+                amp_s.refExtremeTime := t
+                amp_s.localOpp       := amp_s.refExtreme
             if l < amp_s.localOpp
                 amp_s.localOpp := l
             if l < amp_s.oppExtreme
                 amp_s.oppExtreme      := l
+                amp_s.oppExtremeTime  := t
                 amp_s.recoveryExt     := l
                 amp_s.retracementSeen := true
                 oppDropped            := true
@@ -1942,12 +1987,14 @@ f_processAmpBar(float h, float l, int t) =>
                 amp_s.recoveryExt := h
         else
             if l < amp_s.refExtreme
-                amp_s.refExtreme := l
-                amp_s.localOpp   := amp_s.refExtreme
+                amp_s.refExtreme     := l
+                amp_s.refExtremeTime := t
+                amp_s.localOpp       := amp_s.refExtreme
             if h > amp_s.localOpp
                 amp_s.localOpp := h
             if h > amp_s.oppExtreme
                 amp_s.oppExtreme      := h
+                amp_s.oppExtremeTime  := t
                 amp_s.recoveryExt     := h
                 amp_s.retracementSeen := true
                 oppDropped            := true
@@ -1976,11 +2023,13 @@ f_processAmpBar(float h, float l, int t) =>
             string newDirection = amp_s.direction == "up" ? "down" : "up"
             bool useBearColor = newDirection == "up"
             if inWindow and revTrigger >= l and revTrigger <= h
-                f_drawAmpMarker(revTrigger, useBearColor, t)
+                f_drawAmpMarker(revTrigger, useBearColor, amp_s.refExtreme, amp_s.refExtremeTime)
             amp_s.direction       := newDirection
             amp_s.origin          := amp_s.refExtreme
             amp_s.refExtreme      := revTrigger
+            amp_s.refExtremeTime  := t
             amp_s.oppExtreme      := revTrigger
+            amp_s.oppExtremeTime  := t
             amp_s.localOpp        := revTrigger
             amp_s.recoveryExt     := revTrigger
             amp_s.retracementSeen := false
@@ -1998,10 +2047,12 @@ f_processAmpBar(float h, float l, int t) =>
                 float contTrigger = amp_s.direction == "up" ? amp_s.oppExtreme + ampPathPrice : amp_s.oppExtreme - ampPathPrice
                 bool useBearColor = amp_s.direction == "up"
                 if inWindow and contTrigger >= l and contTrigger <= h
-                    f_drawAmpMarker(contTrigger, useBearColor, t)
+                    f_drawAmpMarker(contTrigger, useBearColor, amp_s.oppExtreme, amp_s.oppExtremeTime)
                 amp_s.origin          := amp_s.oppExtreme
                 amp_s.refExtreme      := contTrigger
+                amp_s.refExtremeTime  := t
                 amp_s.oppExtreme      := contTrigger
+                amp_s.oppExtremeTime  := t
                 amp_s.localOpp        := contTrigger
                 amp_s.recoveryExt     := contTrigger
                 amp_s.retracementSeen := false

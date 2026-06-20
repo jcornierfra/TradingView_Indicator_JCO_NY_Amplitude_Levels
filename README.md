@@ -346,6 +346,27 @@ Les 2 alertes (`Efficience NO-GO` et `Efficience SOLDER`) se configurent via le 
 
 ## Changelog
 
+### v3.1.4 - 2026-06-18
+
+**Nouvelle option "Style des marques"** (groupe Marques d'amplitude) avec 2 valeurs :
+
+- **Trait** (défaut) : comportement existant — ligne horizontale au prix de déclenchement.
+- **Rectangle** (nouveau) : box semi-transparente (80%) qui visualise l'**amplitude réelle parcourue** avant le déclenchement.
+
+Pour chaque trigger, le rectangle relie le **point de référence** (prix + timestamp) au **prix du trigger** :
+
+| Phase | Point de référence | Cible |
+|-------|--------------------|-------|
+| Phase 1 (1ère marque du jour) | swing détecté | A1 trigger |
+| Phase 2 reversal | refExtreme (sommet/creux de la jambe précédente) | revTrigger |
+| Phase 2 continuation | oppExtreme (bas/haut du retracement) | contTrigger |
+
+La box couvre en x de la bougie où le point de référence s'est passé jusqu'à la bougie où la marque est tracée. **Verte** pour signal achat (direction `down`), **rouge** pour signal vente (direction `up`).
+
+**Tracking ajouté** : 2 nouveaux champs UDT `AmpState.refExtremeTime` et `AmpState.oppExtremeTime` mémorisent quand chaque point de référence a été atteint, mis à jour à chaque update des extrêmes en Phase 2.
+
+**`max_boxes_count=500`** ajouté à la déclaration `indicator()` pour éviter de hitter la limite par défaut de 50 sur une journée chargée en mode Rectangle.
+
 ### v3.1.3 - 2026-06-17
 
 **Fix décalage des marques d'amplitude.** Sur des TF supérieures à M1 (typiquement M5), les marques pouvaient être décalées d'une bougie vers la droite, donnant l'impression qu'elles s'affichaient sur une bougie "future" pas encore dessinée.
