@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 3.1.4
+// Version: 3.1.5
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -38,6 +38,32 @@
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v3.1.5 - 2026-06-22
+//     - Nouveau groupe "Alertes sonores" : permet de declencher une alerte
+//       sonore quand une marque d'amplitude apparait dans une plage horaire
+//       configurable. Jusqu'a 3 fenetres temporelles independantes, chacune
+//       avec son propre toggle on/off + heure de debut (HH:MM) + heure de
+//       fin (HH:MM). Toutes les 3 activees par defaut :
+//         * Fenetre 1 : 09h00 - 11h00 (session London active)
+//         * Fenetre 2 : 15h30 - 16h15 (coeur NY AM)
+//         * Fenetre 3 : 18h30 - 20h00 (session NY PM)
+//       Timezone utilisee = amp_tz_id (Paris par defaut). Toggle global
+//       "Activer les alertes sur marques" pour couper d'un coup les 3
+//       fenetres sans toucher a leur configuration.
+//     - Logique : a chaque marque tracee (Phase 1 bull/bear + Phase 2
+//       reversal/continuation), un helper f_maybeAlert verifie si le
+//       timestamp M1 du trigger tombe dans une des 3 fenetres actives.
+//       Si oui -> alert() declenche avec message "JCO Amplitude - Marque
+//       Long (achat)" ou "Short (vente)" selon la direction. Frequence
+//       alert.freq_once_per_bar (1 alerte max par bougie M1).
+//     - IMPORTANT : pour avoir le son cote TradingView, le user doit
+//       creer UNE alerte sur l'indicateur via le menu "Alertes" :
+//         1. Condition = "JCO NY Amplitude Levels" + "Any alert() function call"
+//         2. Onglet Notifications -> activer "Play sound" + choisir le son
+//       Une seule alerte couvre les 3 fenetres + les 4 sites de trigger.
+//       C'est une limitation Pine Script - alert() ne peut pas jouer de
+//       son sans une alerte cree manuellement via l'UI.
+//
 //   v3.1.4 - 2026-06-18
 //     - Greffon : nouvelle option "Style des marques" avec 2 valeurs
 //       Trait - defaut, comportement existant ou Rectangle - nouveau.
@@ -695,6 +721,33 @@ markerWidthBars = input.float(2,    "Largeur marque (bars)",          minval=0.5
 amp_lineWidth   = input.int(3,      "Epaisseur trait",                minval=1, maxval=10, group=grp_marks)
 amp_bullColor   = input.color(color.new(#00C853, 10), "Couleur haussiere (signal achat)", group=grp_marks)
 amp_bearColor   = input.color(color.new(#FF1744, 10), "Couleur baissiere (signal vente)", group=grp_marks)
+
+// ── Alertes sonores ───────────────────────────────────────────────────────────
+// 3 fenetres temporelles configurables. Si une marque est tracee dans une
+// fenetre active, alert() est declenchee. Pour avoir le son, l'utilisateur
+// doit creer une alerte sur l'indicateur via le menu "Alertes" TradingView
+// (Toute alerte() ou condition) et configurer le son de son choix.
+// Timezone = amp_tz_id (Paris par defaut).
+grp_alerts     = "Alertes sonores"
+alert_enabled  = input.bool(true, "Activer les alertes sur marques", group=grp_alerts)
+
+alert1_on      = input.bool(true, "Fenetre 1", inline="al1", group=grp_alerts)
+alert1_startH  = input.int(9,  "de",  minval=0, maxval=23, inline="al1", group=grp_alerts)
+alert1_startM  = input.int(0,  "h",   minval=0, maxval=59, inline="al1", group=grp_alerts)
+alert1_endH    = input.int(11, "a",   minval=0, maxval=23, inline="al1", group=grp_alerts)
+alert1_endM    = input.int(0,  "h",   minval=0, maxval=59, inline="al1", group=grp_alerts)
+
+alert2_on      = input.bool(true, "Fenetre 2", inline="al2", group=grp_alerts)
+alert2_startH  = input.int(15, "de",  minval=0, maxval=23, inline="al2", group=grp_alerts)
+alert2_startM  = input.int(30, "h",   minval=0, maxval=59, inline="al2", group=grp_alerts)
+alert2_endH    = input.int(16, "a",   minval=0, maxval=23, inline="al2", group=grp_alerts)
+alert2_endM    = input.int(15, "h",   minval=0, maxval=59, inline="al2", group=grp_alerts)
+
+alert3_on      = input.bool(true, "Fenetre 3", inline="al3", group=grp_alerts)
+alert3_startH  = input.int(18, "de",  minval=0, maxval=23, inline="al3", group=grp_alerts)
+alert3_startM  = input.int(30, "h",   minval=0, maxval=59, inline="al3", group=grp_alerts)
+alert3_endH    = input.int(20, "a",   minval=0, maxval=23, inline="al3", group=grp_alerts)
+alert3_endM    = input.int(0,  "h",   minval=0, maxval=59, inline="al3", group=grp_alerts)
 
 // Effective L/S amp1/amp2 values per session, in points (= prix / amp_pointSize).
 // Initialisees avec les 4 inputs manuels (memes valeurs pour les 3 sessions),
@@ -1758,6 +1811,19 @@ f_drawAmpMarker(triggerPrice, useBearColor, swingPrice, swingTime) =>
                                 bgcolor=col_box, border_color=col_box)
         int _ret = 0
 
+// === Helper alertes : declenche alert() si le timestamp tombe dans une des
+// 3 fenetres horaires actives. Le user doit creer une alerte sur l'indicateur
+// dans le menu Alertes TradingView (alert() function calls) pour avoir le son.
+f_maybeAlert(t, useBearColor) =>
+    if alert_enabled
+        int mins = hour(t, amp_tz_id) * 60 + minute(t, amp_tz_id)
+        bool inW1 = alert1_on and mins >= alert1_startH * 60 + alert1_startM and mins < alert1_endH * 60 + alert1_endM
+        bool inW2 = alert2_on and mins >= alert2_startH * 60 + alert2_startM and mins < alert2_endH * 60 + alert2_endM
+        bool inW3 = alert3_on and mins >= alert3_startH * 60 + alert3_startM and mins < alert3_endH * 60 + alert3_endM
+        if inW1 or inW2 or inW3
+            string direction = useBearColor ? "Short (vente)" : "Long (achat)"
+            alert("JCO Amplitude - Marque " + direction, alert.freq_once_per_bar)
+
 // === Traitement d'une bougie M1 ===
 f_processAmpBar(float h, float l, int t) =>
     // 1) Push history + trim
@@ -1941,6 +2007,7 @@ f_processAmpBar(float h, float l, int t) =>
         if bullTriggered
             if inWindow and bullTrigger >= l and bullTrigger <= h
                 f_drawAmpMarker(bullTrigger, true, amp_s.swingLow, amp_s.swingLowTime)
+                f_maybeAlert(t, true)
             amp_s.phase           := "tracking"
             amp_s.direction       := "up"
             amp_s.origin          := amp_s.swingLow
@@ -1955,6 +2022,7 @@ f_processAmpBar(float h, float l, int t) =>
         else if bearTriggered
             if inWindow and bearTrigger >= l and bearTrigger <= h
                 f_drawAmpMarker(bearTrigger, false, amp_s.swingHigh, amp_s.swingHighTime)
+                f_maybeAlert(t, false)
             amp_s.phase           := "tracking"
             amp_s.direction       := "down"
             amp_s.origin          := amp_s.swingHigh
@@ -2024,6 +2092,7 @@ f_processAmpBar(float h, float l, int t) =>
             bool useBearColor = newDirection == "up"
             if inWindow and revTrigger >= l and revTrigger <= h
                 f_drawAmpMarker(revTrigger, useBearColor, amp_s.refExtreme, amp_s.refExtremeTime)
+                f_maybeAlert(t, useBearColor)
             amp_s.direction       := newDirection
             amp_s.origin          := amp_s.refExtreme
             amp_s.refExtreme      := revTrigger
@@ -2048,6 +2117,7 @@ f_processAmpBar(float h, float l, int t) =>
                 bool useBearColor = amp_s.direction == "up"
                 if inWindow and contTrigger >= l and contTrigger <= h
                     f_drawAmpMarker(contTrigger, useBearColor, amp_s.oppExtreme, amp_s.oppExtremeTime)
+                    f_maybeAlert(t, useBearColor)
                 amp_s.origin          := amp_s.oppExtreme
                 amp_s.refExtreme      := contTrigger
                 amp_s.refExtremeTime  := t

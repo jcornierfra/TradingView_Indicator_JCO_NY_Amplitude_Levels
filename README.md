@@ -346,6 +346,29 @@ Les 2 alertes (`Efficience NO-GO` et `Efficience SOLDER`) se configurent via le 
 
 ## Changelog
 
+### v3.1.5 - 2026-06-22
+
+**Nouveau groupe "Alertes sonores"** : déclenchement d'une alerte sonore quand une marque d'amplitude apparaît dans une plage horaire configurable. Jusqu'à **3 fenêtres temporelles** indépendantes, chacune avec son propre toggle on/off + heure de début (HH:MM) + heure de fin (HH:MM).
+
+**Défauts (les 3 fenêtres activées)** :
+
+| Fenêtre | Plage horaire | Cible                 |
+|---------|---------------|-----------------------|
+| 1       | 09h00 → 11h00 | Session London active |
+| 2       | 15h30 → 16h15 | Cœur NY AM            |
+| 3       | 18h30 → 20h00 | Session NY PM         |
+
+Timezone utilisée = `amp_tz_id` (Paris par défaut). Un toggle global `Activer les alertes sur marques` permet de couper d'un coup les 3 fenêtres sans toucher à leur configuration.
+
+**Logique** : à chaque marque tracée (Phase 1 bull/bear + Phase 2 reversal/continuation), un helper `f_maybeAlert` vérifie si le timestamp M1 du trigger tombe dans une des 3 fenêtres actives. Si oui → `alert()` déclenche avec message `JCO Amplitude - Marque Long (achat)` ou `Short (vente)` selon la direction. Fréquence `alert.freq_once_per_bar` (1 alerte max par bougie M1).
+
+**Important — configuration côté TradingView** : pour avoir le son, il faut créer **une** alerte sur l'indicateur via le menu **Alertes** :
+
+1. Condition = `JCO NY Amplitude Levels` + `Any alert() function call`
+2. Onglet **Notifications** → activer **Play sound** + choisir le son
+
+Une seule alerte couvre les 3 fenêtres + les 4 sites de trigger. C'est une limitation Pine Script : `alert()` ne peut pas jouer de son sans une alerte créée manuellement via l'UI.
+
 ### v3.1.4 - 2026-06-18
 
 **Nouvelle option "Style des marques"** (groupe Marques d'amplitude) avec 2 valeurs :
