@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © jcornier
 //
-// Version: 3.1.5
+// Version: 3.1.7
 // GitHub: https://github.com/jcornierfra/TradingView_Indicator_JCO_NY_Amplitude_Levels
 //
 // Description: Draws Fibonacci retracement and extension levels based on the Pre-NY session
@@ -34,10 +34,44 @@
 //              - Greffon "Marques d'amplitude" : detection swing M1 + machine d'etats
 //                deux phases qui pose des marques aux points d'amplitude amp1/amp2
 //                (port de l'indicateur JCO Amplitude v2.2.0)
+//              - Greffon "VWAP ancree" : VWAP jaune re-ancree chaque jour a une
+//                heure configurable (HH:MM, timezone amp_tz_id), avec bandes
+//                d'ecart-type optionnelles SD 1 / 2 / 3 (gris, decochees par defaut)
 //              - Visible from 7h Paris until end of NY PM session
 //              - Midnight label auto-offset when close to a visible level
 //
 // Changelog:
+//   v3.1.7 - 2026-07-18
+//     - Greffon VWAP : ajout des bandes d'ecart-type optionnelles (SD 1 / 2 / 3),
+//       toutes decochees par defaut. Une ligne d'inputs par multiplicateur dans
+//       le groupe "VWAP ancree (greffon)", au format des lignes Fibo :
+//         [case a cocher] [couleur] [epaisseur] [type de ligne]
+//       Defaut : gris, epaisseur 1. Chaque toggle pilote la bande HAUTE et la
+//       bande BASSE du meme multiplicateur (6 plots au total).
+//     - Ecart-type pondere par le volume, recalcule depuis l'ancrage :
+//         var = (somme p^2 * vol) / somme vol - vwap^2   puis sd = sqrt(var)
+//       La variance est clampee a >= 0 pour absorber les erreurs d'arrondi
+//       flottant quand tous les prix depuis l'ancrage sont identiques.
+//     - LIMITATION Pine : plot() ne connait pas les styles dashed / dotted de
+//       line.new(). Le selecteur "type de ligne" propose donc les 3 rendus
+//       reellement disponibles : "Trait" (ligne continue), "Points" (cercles,
+//       equivalent visuel du pointille), "Croix" (equivalent des tirets).
+//
+//   v3.1.6 - 2026-07-18
+//     - Nouveau greffon "VWAP ancree" : trace une VWAP jaune re-ancree chaque
+//       jour a une heure configurable. Nouveau groupe d'inputs "VWAP ancree
+//       (greffon)" avec :
+//         * "Afficher la VWAP" (toggle on/off, actif par defaut)
+//         * "Heure ancrage" / "Minute ancrage" (defaut 15h30 = open NY AM)
+//         * "Couleur" (jaune par defaut) et "Epaisseur" (defaut 2)
+//     - Ancrage evalue dans la timezone amp_tz_id (Paris par defaut), comme
+//       les sessions et les alertes. Le cumul prix*volume / volume repart de
+//       zero des que la bougie franchit l'heure d'ancrage (ou au changement
+//       de jour local, ce qui couvre un ancrage a 00h00 et les gaps de session).
+//     - Prix utilise = hlc3. Si le symbole n'a pas de volume (indices, certains
+//       CFD), chaque bougie est ponderee a 1 : la courbe devient une moyenne
+//       simple des prix typiques depuis l'ancrage au lieu de disparaitre.
+//
 //   v3.1.5 - 2026-06-22
 //     - Nouveau groupe "Alertes sonores" : permet de declencher une alerte
 //       sonore quand une marque d'amplitude apparait dans une plage horaire
@@ -748,6 +782,39 @@ alert3_startH  = input.int(18, "de",  minval=0, maxval=23, inline="al3", group=g
 alert3_startM  = input.int(30, "h",   minval=0, maxval=59, inline="al3", group=grp_alerts)
 alert3_endH    = input.int(20, "a",   minval=0, maxval=23, inline="al3", group=grp_alerts)
 alert3_endM    = input.int(0,  "h",   minval=0, maxval=59, inline="al3", group=grp_alerts)
+
+// ── Greffon : VWAP ancree ─────────────────────────────────────────────────────
+// VWAP re-ancree chaque jour a une heure configurable (HH:MM) dans la timezone
+// amp_tz_id (Paris par defaut). Le cumul prix*volume / volume repart de zero a
+// chaque franchissement de l'heure d'ancrage. Calcul et trace en fin de fichier.
+grp_vwap       = "VWAP ancree (greffon)"
+show_vwap      = input.bool(true, "Afficher la VWAP", group=grp_vwap)
+vwap_anchorH   = input.int(15, "Heure ancrage",  minval=0, maxval=23, inline="vw_anchor", group=grp_vwap)
+vwap_anchorM   = input.int(30, "Minute ancrage", minval=0, maxval=59, inline="vw_anchor", group=grp_vwap)
+col_vwap       = input.color(color.new(color.yellow, 0), "Couleur", inline="vw_style", group=grp_vwap)
+wid_vwap       = input.int(2, "Epaisseur", minval=1, maxval=5, inline="vw_style", group=grp_vwap)
+
+// Bandes d'ecart-type : une ligne d'inputs par multiplicateur (1 / 2 / 3).
+// Chaque toggle pilote la bande HAUTE et la bande BASSE du meme multiplicateur.
+// Note Pine : plot() ne sait pas tracer en pointille / tirets comme line.new().
+// Le selecteur de style propose donc les 3 rendus reellement disponibles :
+//   "Trait"  -> plot.style_line    (ligne continue)
+//   "Points" -> plot.style_circles (equivalent visuel du pointille)
+//   "Croix"  -> plot.style_cross   (equivalent visuel des tirets)
+show_sd1 = input.bool(false, "SD 1", inline="sd1", group=grp_vwap)
+col_sd1  = input.color(color.new(color.gray, 0), "", inline="sd1", group=grp_vwap)
+wid_sd1  = input.int(1, "", minval=1, maxval=5, inline="sd1", group=grp_vwap)
+sty_sd1  = input.string("Trait", "", options=["Trait","Points","Croix"], inline="sd1", group=grp_vwap)
+
+show_sd2 = input.bool(false, "SD 2", inline="sd2", group=grp_vwap)
+col_sd2  = input.color(color.new(color.gray, 0), "", inline="sd2", group=grp_vwap)
+wid_sd2  = input.int(1, "", minval=1, maxval=5, inline="sd2", group=grp_vwap)
+sty_sd2  = input.string("Trait", "", options=["Trait","Points","Croix"], inline="sd2", group=grp_vwap)
+
+show_sd3 = input.bool(false, "SD 3", inline="sd3", group=grp_vwap)
+col_sd3  = input.color(color.new(color.gray, 0), "", inline="sd3", group=grp_vwap)
+wid_sd3  = input.int(1, "", minval=1, maxval=5, inline="sd3", group=grp_vwap)
+sty_sd3  = input.string("Trait", "", options=["Trait","Points","Croix"], inline="sd3", group=grp_vwap)
 
 // Effective L/S amp1/amp2 values per session, in points (= prix / amp_pointSize).
 // Initialisees avec les 4 inputs manuels (memes valeurs pour les 3 sessions),
@@ -2141,3 +2208,56 @@ if show_marks and not na(amp_m1_h)
             float m1_l = array.get(amp_m1_l, i)
             int   m1_t = array.get(amp_m1_t, i)
             f_processAmpBar(m1_h, m1_l, m1_t)
+
+// === Greffon : VWAP ancree ===
+// Ancrage quotidien a vwap_anchorH:vwap_anchorM (timezone amp_tz_id).
+// Reset du cumul quand la bougie franchit l'heure d'ancrage, c.a.d. quand la
+// bougie courante est >= ancrage alors que la precedente etait avant (ou que
+// le jour local a change, cas d'un ancrage a 00h00 ou d'un gap de session).
+int vwap_anchorMins = vwap_anchorH * 60 + vwap_anchorM
+int vwap_nowMins    = hour(time, amp_tz_id) * 60 + minute(time, amp_tz_id)
+int vwap_dayKey     = year(time, amp_tz_id) * 10000 + month(time, amp_tz_id) * 100 + dayofmonth(time, amp_tz_id)
+
+bool vwap_newAnchor = vwap_nowMins >= vwap_anchorMins and
+                      (na(vwap_nowMins[1]) or vwap_nowMins[1] < vwap_anchorMins or vwap_dayKey != vwap_dayKey[1])
+
+var float vwap_cumPV  = 0.0
+var float vwap_cumVol = 0.0
+var float vwap_cumPV2 = 0.0   // somme ponderee des carres, pour l'ecart-type
+
+if vwap_newAnchor
+    vwap_cumPV  := 0.0
+    vwap_cumVol := 0.0
+    vwap_cumPV2 := 0.0
+
+// Volume absent (indices, certains CFD) -> on retombe sur une moyenne simple
+// des prix typiques en ponderant chaque bougie a 1.
+float vwap_vol = na(volume) or volume <= 0 ? 1.0 : volume
+vwap_cumPV  += hlc3 * vwap_vol
+vwap_cumPV2 += hlc3 * hlc3 * vwap_vol
+vwap_cumVol += vwap_vol
+
+float vwap_val = vwap_cumVol > 0 ? vwap_cumPV / vwap_cumVol : na
+
+// Ecart-type ponderé par le volume depuis l'ancrage :
+//   var = E[p^2] - E[p]^2  avec E[.] = moyenne ponderee volume
+// Le max(0, .) protege des variances legerement negatives dues aux erreurs
+// d'arrondi flottant quand tous les prix depuis l'ancrage sont identiques.
+float vwap_var = vwap_cumVol > 0 ? math.max(0.0, vwap_cumPV2 / vwap_cumVol - vwap_val * vwap_val) : na
+float vwap_sd  = math.sqrt(vwap_var)
+
+// plot() n'accepte pas les styles dashed/dotted de line.new() : on mappe les
+// 3 options sur les styles plot reellement disponibles (cf. commentaire inputs).
+f_plotstyle(s) =>
+    s == "Points" ? plot.style_circles : s == "Croix" ? plot.style_cross : plot.style_line
+
+// Chaque toggle SD pilote la bande haute ET la bande basse du multiplicateur.
+plot(show_vwap ? vwap_val : na, title="VWAP ancree", color=col_vwap,
+     linewidth=wid_vwap, style=plot.style_linebr)
+
+plot(show_vwap and show_sd1 ? vwap_val + vwap_sd     : na, title="VWAP +1 SD", color=col_sd1, linewidth=wid_sd1, style=f_plotstyle(sty_sd1))
+plot(show_vwap and show_sd1 ? vwap_val - vwap_sd     : na, title="VWAP -1 SD", color=col_sd1, linewidth=wid_sd1, style=f_plotstyle(sty_sd1))
+plot(show_vwap and show_sd2 ? vwap_val + vwap_sd * 2 : na, title="VWAP +2 SD", color=col_sd2, linewidth=wid_sd2, style=f_plotstyle(sty_sd2))
+plot(show_vwap and show_sd2 ? vwap_val - vwap_sd * 2 : na, title="VWAP -2 SD", color=col_sd2, linewidth=wid_sd2, style=f_plotstyle(sty_sd2))
+plot(show_vwap and show_sd3 ? vwap_val + vwap_sd * 3 : na, title="VWAP +3 SD", color=col_sd3, linewidth=wid_sd3, style=f_plotstyle(sty_sd3))
+plot(show_vwap and show_sd3 ? vwap_val - vwap_sd * 3 : na, title="VWAP -3 SD", color=col_sd3, linewidth=wid_sd3, style=f_plotstyle(sty_sd3))

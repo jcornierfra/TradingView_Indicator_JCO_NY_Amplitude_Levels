@@ -177,6 +177,54 @@ Sans la case de la session courante cochée, la state machine tourne en continu 
 
 ---
 
+## VWAP ancrée (greffon)
+
+Greffon ajouté en v3.1.6 : une **VWAP jaune ré-ancrée chaque jour** à une heure configurable, avec bandes d'écart-type optionnelles (v3.1.7).
+
+### Principe
+
+Le cumul `prix × volume / volume` repart de zéro dès que la bougie franchit l'heure d'ancrage. Le prix utilisé est `hlc3`. L'ancrage est évalué dans la timezone `amp_tz_id` (Paris par défaut) — la même que les sessions et les alertes sonores.
+
+Le reset est également déclenché sur un changement de jour local, ce qui couvre proprement deux cas limites : un ancrage réglé à `00h00`, et les gaps de session (week-end, jours fériés CME).
+
+**Symbole sans volume** (indices, certains CFD) : chaque bougie est pondérée à 1 au lieu de disparaître. La courbe devient alors une moyenne simple des prix typiques depuis l'ancrage.
+
+### Bandes d'écart-type (v3.1.7)
+
+Trois multiplicateurs disponibles — **SD 1 / 2 / 3** — tous **décochés par défaut**, en **gris, épaisseur 1**. Chaque case à cocher pilote la bande **haute et basse** du même multiplicateur (6 tracés au total).
+
+L'écart-type est pondéré par le volume et recalculé depuis l'ancrage :
+
+```text
+var = (Σ p² × vol) / Σ vol − vwap²
+sd  = √var
+```
+
+La variance est clampée à `≥ 0` pour absorber les erreurs d'arrondi flottant quand tous les prix depuis l'ancrage sont identiques. Sur la première bougie après un reset, `sd = 0` et les 6 bandes se superposent à la VWAP — comportement normal.
+
+### Limitation Pine sur le type de ligne
+
+`plot()` ne connaît **pas** les styles `dashed` / `dotted` de `line.new()`. Le sélecteur **type de ligne** propose donc les 3 rendus réellement disponibles :
+
+| Option     | Style Pine           | Rendu                             |
+|------------|----------------------|-----------------------------------|
+| **Trait**  | `plot.style_line`    | Ligne continue (défaut)           |
+| **Points** | `plot.style_circles` | Équivalent visuel du pointillé    |
+| **Croix**  | `plot.style_cross`   | Équivalent visuel des tirets      |
+
+Obtenir un vrai pointillé imposerait de dessiner la courbe segment par segment via `line.new()`, ce qui saturerait la limite de 500 lignes en quelques bougies.
+
+### Paramètres
+
+Groupe **VWAP ancrée (greffon)** :
+
+- **Afficher la VWAP** (défaut **coché**) — toggle maître : décoché, il masque aussi les 6 bandes SD.
+- **Heure ancrage** / **Minute ancrage** (défaut **15h30** = open NY AM)
+- **Couleur** (défaut **jaune**) et **Épaisseur** (défaut **2**)
+- **SD 1** / **SD 2** / **SD 3** (défaut **décochés**) — chacune avec couleur (gris), épaisseur (1) et type de ligne (Trait)
+
+---
+
 ## Dashboard
 
 Affiché en bas à droite du graphique, **3 colonnes × 9 lignes** :
@@ -345,6 +393,39 @@ Les 2 alertes (`Efficience NO-GO` et `Efficience SOLDER`) se configurent via le 
 ---
 
 ## Changelog
+
+### v3.1.7 - 2026-07-18
+
+**Bandes d'écart-type sur la VWAP ancrée.** Trois multiplicateurs optionnels — **SD 1 / 2 / 3** — tous **décochés par défaut**, en **gris, épaisseur 1**. Une ligne d'inputs par multiplicateur, au format des lignes Fibo : `[case à cocher] [couleur] [épaisseur] [type de ligne]`. Chaque toggle pilote la bande **haute et basse** du même multiplicateur (6 tracés au total).
+
+Écart-type pondéré par le volume, recalculé depuis l'ancrage :
+
+```text
+var = (Σ p² × vol) / Σ vol − vwap²
+sd  = √var
+```
+
+La variance est clampée à `≥ 0` pour absorber les erreurs d'arrondi flottant quand tous les prix depuis l'ancrage sont identiques.
+
+**Limitation Pine** : `plot()` ne connaît pas les styles `dashed` / `dotted` de `line.new()`. Le sélecteur *type de ligne* propose donc les 3 rendus réellement disponibles :
+
+| Option     | Style Pine           | Rendu                          |
+|------------|----------------------|--------------------------------|
+| **Trait**  | `plot.style_line`    | Ligne continue (défaut)        |
+| **Points** | `plot.style_circles` | Équivalent visuel du pointillé |
+| **Croix**  | `plot.style_cross`   | Équivalent visuel des tirets   |
+
+### v3.1.6 - 2026-07-18
+
+**Nouveau greffon "VWAP ancrée"** : une VWAP jaune ré-ancrée chaque jour à une heure configurable. Nouveau groupe d'inputs **VWAP ancrée (greffon)** :
+
+- **Afficher la VWAP** (toggle on/off, **coché** par défaut)
+- **Heure ancrage** / **Minute ancrage** (défaut **15h30** = open NY AM)
+- **Couleur** (jaune par défaut) et **Épaisseur** (défaut 2)
+
+L'ancrage est évalué dans la timezone `amp_tz_id` (Paris par défaut), comme les sessions et les alertes. Le cumul `prix × volume / volume` repart de zéro dès que la bougie franchit l'heure d'ancrage, ou au changement de jour local — ce qui couvre un ancrage à `00h00` et les gaps de session.
+
+Prix utilisé = `hlc3`. Si le symbole n'a pas de volume (indices, certains CFD), chaque bougie est pondérée à 1 : la courbe devient une moyenne simple des prix typiques depuis l'ancrage au lieu de disparaître.
 
 ### v3.1.5 - 2026-06-22
 
